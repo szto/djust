@@ -284,6 +284,96 @@ issue or be explicitly closed with a reason.
 | 242 | Canon — when changing a filter convention, grep ALL call sites for the OLD convention | Retro v0.9.3-2 (backfilled) | #1391 | Closed | Resolved in v0.9.5-2 PR #1399 — added to CLAUDE.md Process Canon section with concrete Stage 4 grep check. |
 | 243 | Canonicalize 'one-shot per-class warning' framework pattern | Retro v0.9.3-2 (backfilled) | #1392 | Closed | Resolved in v0.9.5-2 PR #1399 — `emit_one_shot_class_warning(cls, key, message, *args)` extracted in `python/djust/utils.py`; existing snapshot-truncation warning refactored to use it. |
 | 244 | Extend filter-migration grep canon (#1391) to cover symbol removals during refactor | Retro v0.9.5-2 (finding #2) | #1400 | Open | PR #1399's #1392 helper extraction left an orphan `_TRUNCATION_WARNED` import in `python/tests/test_snapshot_truncation_warning.py`; pre-push hook caught it. Existing #1391 names "filter expressions" specifically; should generalize to "any symbol removal during refactor — grep `tests/`, `python/tests/`, examples for the OLD name." |
+| 245 | Lock-release/lock-reacquire TOCTOU canon (generalize Action #1198 to lock-windows) | Retro v0.9.6-1 (finding #1) | #1445 | Open | PR #1438's first-pass fix had a TOCTOU between unlocked round-trip and relocked discard. Stage 11 caught via explicit TOCTOU prompt; Stage 7 missed. Identity-guarded the pop. Generalizes Action #1198 (`commit-or-rollback handler shape`) from await-windows to lock-windows. |
+| 246 | Zero-cost-when-unused middleware/processor pattern canon | Retro v0.9.6-1 (finding #3) | #1446 | Open | Same shape applied to two PRs in the same drain (#1441 TenantMiddleware, #1443 theme components): detect-once-in-init + no-op fast path. Generalizes to other djust extras (`presence`, `streaming`, etc.). Audit candidates listed in the issue body. |
+| 247 | Cache-by-struct: include all fields upfront, prune later | Retro v0.9.6-1 (finding #4) | #1447 | Open | PR #1442's initial cache key missed `theme` and `layout` fields of `ThemeState`. Test failure caught it pre-merge. Lesson: when wrapping a function whose inputs derive from a struct, key on the FULL struct upfront. Add to Stage 4 plan template. |
+| 248 | Wire-protocol JSON pinning across other Rust↔JS / Python↔JS contracts | Retro v0.9.6-1 (finding #5) | #1448 | Open | Generalizes PR #1444's #1419 VDOM-patch wire snapshots. Other unpinned contracts: JIT serialization, time-travel payloads, presence frames, streaming frames, push-event envelope. Each is a silent-break-on-rename surface. |
+| 249 | Deferral-pattern-aware depth-N call-graph walker for bundle-init-order lint (#1406 redo) | Retro v0.9.6-1 (finding #6) | #1449 | Open | Naive depth-N walker produced 16 false positives — flags handler-registered functions (`addEventListener`/Turbo callbacks) that don't actually run at top-level. New shape: model `addEventListener` / `setTimeout` / `Promise.then` deferrals as exclusion sites. Umbrella #1406 stays open with the new shape recorded; this issue is the v0.9.6-2 / v0.10.0 redo. |
+
+## v0.9.6-1 — Post-v0.9.6rc1 drain (security + DX cleanup) (PRs #1438–#1444)
+
+**Date**: 2026-05-09
+**Scope**: 9 work items planned for v0.9.6-1; 7 PRs merged in this autonomous drain (#1438 InMemoryStateBackend race fix, #1439 Django comment-parser docs, #1440 D001 psycopg3 system check, #1441 TenantMiddleware short-circuit, #1442 theme_context lru-cache, #1443 pre-rendered theme components, #1444 VDOM Patch JSON wire-protocol snapshots). 1 issue (#1406 bundle-init-order depth-N) deferred-with-investigation after empirical false-positive discovery. 1 P0 (#1430 Redis ZstdDecompressor segfault) was already in flight as PR #1431 when the drain started. 5 of 6 VDOM-test cluster sub-issues remain open for v0.9.6-2 (each needs substantial test design).
+**Tests at close**: ~5004 Python passed (4253 baseline + 51 deploy_cli net + 8 D001 + 4 tenant + 9 theming + 1 InMemoryStateBackend); 16 wire-protocol Rust snapshots; 248 djust_vdom Rust tests.
+
+### What We Learned
+
+**1. Lock-release/lock-reacquire TOCTOU is a distinct failure class — generalizes Action #1198 (commit-or-rollback) to lock-window arithmetic.**
+PR #1438 fixed #1410 (InMemoryStateBackend silent shared-ref) by popping the corrupt entry inside the lock and returning `None`. The first-pass fix had a TOCTOU: the round-trip ran *outside* the lock (correct — msgpack is CPU-only), then *re-entered* the lock to pop. A concurrent `set(key, new_view)` landing in that window would have been clobbered by the unconditional pop. Stage 7 self-review missed it; Stage 11 reviewer (with explicit TOCTOU prompt) caught it. Identity-guarded the pop with `current[0] is view`.
+
+This is structurally the same shape as Action #1198 (`commit-or-rollback handler shape`) — that one is about *async* await-windows where state mutations should defer past early-return checks. The lock-window analogue: when a handler holds a lock, releases for unlocked work, then re-enters the lock to mutate, the entry it's mutating may have been replaced. Identity-guard or version-counter at re-entry.
+
+**Action taken**: Open — tracked in Action Tracker #245 (GitHub #1445).
+
+**2. Reproducer-first discipline closes investigation-class issues in minutes, not hours.**
+PR #1439 (#1423 Django parser comment-with-partial-tag) was an investigation-class issue. The reporter explicitly asked "djust bug or upstream Django?" Direct verification — running the failing template through `djust._rust.render_template` — cleared djust's tokenizer in 60 seconds. No code change; close-without-code via a one-page docs note in `template-cheatsheet.md`. Total wall-clock: ~10 min vs ~1 hr if I'd opened a Rust-engine PR-investigation rabbit hole.
+
+This validates Action #1210 (Stage 4 reproducer-first) for the *investigation* path specifically, not just bugfix path. The reproducer is what distinguishes "this is a djust bug" from "this is upstream — document the gotcha."
+
+**Action taken**: Closed — Action #1210 is already canon (`feature-state.json` Stage 4); no separate tracker row needed. Behaviour validated empirically.
+
+**3. Zero-cost-when-unused middleware pattern surfaced twice in the same drain (#1441, #1443) — worth canonicalizing.**
+- PR #1441 (#1436 TenantMiddleware): detect `DJUST_CONFIG['TENANT_RESOLVER']` and `DJUST_TENANTS` both empty in `__init__`; switch `__call__` to a `get_response(request)` passthrough. Saves resolver-call + thread-local set/clear pair per request.
+- PR #1443 (#1435 theme components): similar shape applied to context-processor pre-rendering — try the heavy work, fail-soft to empty strings if the manifest is broken; once-per-request shape replaces once-per-tag-invocation.
+
+Generalizes to: any middleware or context-processor for an optional djust extra. Detect "not opted in" in `__init__`, set a `_enabled` flag, branch on the hot path. The shape costs ~2-5% of per-request CPU when unused (per #1436's profile data) — measurable across djust's optional extras (`tenants`, `theming`, `presence`, `streaming`).
+
+**Action taken**: Open — tracked in Action Tracker #246 (GitHub #1446).
+
+**4. Cache-key completeness when caching by-struct: include EVERY field upfront, prune later.**
+PR #1442 (#1437 theme_context lru-cache) initially keyed on `(preset, pack, mode, resolved_mode, presets)` — missed `theme` and `layout` (other ThemeState fields). The test failure surfaced it before merge, but the lesson is structural: when wrapping a function whose inputs are derived from a struct, key on the *full* struct shape and document why each field matters. Pruning a field later is a one-line change with a regression test; *adding* a field later means cache-poisoning bugs in production.
+
+**Action taken**: Open — tracked in Action Tracker #247 (GitHub #1447).
+
+**5. Wire-protocol JSON pinning as a standard test class.**
+PR #1444 (#1419 VDOM wire snapshots) pins the JSON shape of every `Patch` variant + the `VNode` struct via literal-string assertions. Existing tests verify *semantics* (this diff produces this patch sequence) but didn't pin the *shape*. A field rename or `skip_serializing_if` removal would silently break every deployed client.
+
+The same shape generalizes to any other Rust↔JS or Python↔JS wire contract in djust — for example, the JIT serialization wire-format (`mixins/jit.py` ↔ `15-jit.js`), the time-travel debug payloads, presence frame schema. Each of these is an unpinned contract today.
+
+**Action taken**: Open — tracked in Action Tracker #248 (GitHub #1448).
+
+**6. Naive depth-N call-graph analysis produces false positives — needs deferral-pattern modeling.**
+#1406 (bundle-init-order depth-N) was deferred after implementation surfaced 16 false positives, all of the same shape: module-scope helper functions called from `addEventListener`/Turbo-handler registrations, not from synchronous top-level execution. The naive depth-N walker treats every called function's body as transitively top-level. The right shape: model deferral sites (`addEventListener`, `setTimeout`, `requestAnimationFrame`, `Promise.then`, callback-arg patterns) and exclude their callbacks from transitive top-level analysis.
+
+**Action taken**: Open — tracked in Action Tracker #249 (GitHub #1406 — keep the existing issue open with the new shape; investigation comment posted at https://github.com/djust-org/djust/issues/1406#issuecomment-4411497358).
+
+### Insights
+
+- **5/7 PRs were 5/5 quality**, 2 were 4/5. Both 4/5 cases (#1438 TOCTOU, #1443 pragmatic-not-canonical pre-render) were caught/justified at Stage 11 — the gate is doing its job.
+- **Two-commit shape held cleanly across all 7 PRs.** Impl + tests in commit 1, CHANGELOG in commit 2. Programmatic gates 1+2 from Action #1177 fired correctly on every commit.
+- **Autonomous-drain wall-clock**: 7 PRs in a single session, each through 14 stages. The Stage 11 fix-pass on #1438 (TOCTOU) added one extra commit + push + CI cycle but cleared cleanly.
+- **One implementer agent per checkout (Action #180)**: serial across all 7 PRs. No CHANGELOG cross-contamination.
+- **Pre-existing parallel work**: #1431 (Redis P0) had a fix branch open before the drain started. The drain script correctly skipped it (per the v0.9.6-1 plan in ROADMAP.md), avoiding the parallel-implementer trap.
+
+### Review Stats
+
+| Metric | #1438 | #1439 | #1440 | #1441 | #1442 | #1443 | #1444 | Total |
+|---|---|---|---|---|---|---|---|---|
+| Tests added | 2 (51 total in test_state_backend.py) | 0 (docs) | 12 (8 D001 + 4 parser) | 4 (TenantMiddlewareShortCircuit) | 7 (TestThemeContextCache) | 2 (extends #1437's tests) | 16 (wire_protocol_snapshot.rs) | 43 |
+| 🔴 Findings | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
+| 🟡 Findings | 1 (TOCTOU) | 0 | 0 | 0 | 0 | 0 | 0 | 1 |
+| 🟢 Findings | 1 (`_state_sizes` pop) | 0 | 0 | 0 | 0 | 0 | 0 | 1 |
+| Findings fixed | 2 (1🟡 + 1🟢) | 0 | 0 | 0 | 0 | 0 | 0 | 2 |
+| CI failures | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
+
+### Process Improvements Applied
+
+**CLAUDE.md**: No additions this milestone — the new patterns from findings 1, 3, 4, 5 are filed as Action Tracker rows + GH issues for the *next* milestone to canonicalize. (Per Stage 3.5 gate, the milestone retro is not the place to land canon edits — that's a follow-up PR's job.)
+**Pipeline template**: No changes.
+**Checklist**: No changes.
+**Skills**: No changes.
+
+### Open Items
+
+- [ ] #245 — Lock-release/lock-reacquire TOCTOU canon (GitHub #1445)
+- [ ] #246 — Zero-cost-when-unused middleware/processor pattern docs (GitHub #1446)
+- [ ] #247 — Cache-by-struct: include-all-fields-upfront discipline (GitHub #1447)
+- [ ] #248 — Wire-protocol JSON pinning across other Rust↔JS / Python↔JS contracts (GitHub #1448)
+- [ ] #249 — Deferral-pattern-aware depth-N call-graph walker (GitHub #1449; umbrella #1406)
+- [ ] **VDOM cluster carryovers**: #1413, #1416, #1417, #1418, #1420 — each needs substantial test design; targeted for v0.9.6-2.
+- [ ] **#1431 (P0 Redis ZstdDecompressor segfault)** — in flight when this drain ran; counts toward v0.9.6-1 by membership but its retro happens when the PR merges.
+
+---
 
 ## v0.9.5-2 — Post-rc1 retro drain (audit follow-ups + canon batch) (PRs #1394, #1395, #1397, #1398, #1399)
 
