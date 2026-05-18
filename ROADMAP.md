@@ -19,7 +19,7 @@ Two name shapes appear in this roadmap, with distinct meanings:
 
 **Released**: `v0.9.1` cut 2026-04-30 (tag `v0.9.1`, GitHub Release published, PyPI live). Bundles 8 drain buckets + post-cleanup. Retro: RETRO.md §v0.9.1. Tracker carryovers (#1234, #1235, #1236) and the post-release SSE bug bundle (#1237) move into `v0.9.2-1` below.
 
-## Next: v1.0.0 — Release Readiness
+## v1.0.0 — Release Readiness (rc1 cut 2026-05-17)
 
 > Scoped 2026-05-17 by a `/pipeline-strategy` deep session — see `docs/strategy-sessions/2026-05-17-v1.0.0-readiness.md`.
 
@@ -56,6 +56,109 @@ Two name shapes appear in this roadmap, with distinct meanings:
 - `/pipeline-run --milestone v1.0.0` picks the next unit by priority + dependency order.
 - Drain buckets toward this release use the `v1.0.0-N` naming (see convention above).
 - First task: **#1483** — bugfix pipeline.
+
+**Status (2026-05-17):** All 6 units shipped (PRs #1486, #1488, #1490, #1491, #1492, #1494); milestone retro written (RETRO.md §v1.0.0); `v1.0.0rc1` cut via `/djust-release`. Post-rc1 cleanup is the `v1.0.0rc2` milestone below.
+
+## Next: v1.0.0rc2 — Post-rc1 retro drain
+
+> Created 2026-05-17 by `/pipeline-drain` — drains the v1.0.0 retrospective
+> action items (#1498–#1502, Action Tracker #257–#261) plus the four
+> Action-#1079 follow-up issues filed during the milestone (#1493, #1495,
+> #1496, #1497) into a post-rc1 cleanup bucket. Completion → `/djust-release`
+> cuts `v1.0.0rc2`.
+
+*Goal:* Clear the v1.0.0 retro Action Tracker and the deferred long-tail so
+v1.0.0 final ships with the process canon tightened. All items are P2
+tech-debt; none are release-blocking for rc2, but landing them before final
+keeps the 1.0 docs/canon honest.
+
+| Priority | Issue | Summary |
+|---|---|---|
+| **P2** | #1493 | docs(adr): update stale `Target version` lines in the 10 reconciled ADRs |
+| **P2** | #1495 | Fix 2 low-severity CodeQL note alerts (`TARBALL_EXCLUDES` unused, `py/empty-except`) |
+| **P2** | #1496 | Accessibility long-tail — P2/P3 component ARIA, keyboard JS, Y003+ checks |
+| **P2** | #1497 | README / `docs/roadmap.md` doc-rot reconciliation |
+| **P2** | #1498 | Release procedure must refresh + verify lockfile self-entries (closes #1487) |
+| **P2** | #1499 | Left-shift deprecation-migration stacklevel test to Stage 5 implementer |
+| **P2** | #1500 | Doc-snippet smoke test + mechanically-derivable doc-claim assertions |
+| **P2** | #1501 | Close the ADR-status drift loop — flip `Status` to Accepted when a feature ships |
+| **P2** | #1502 | Stage 4 plan-template — describe ARIA/dependency intent, not specific values |
+
+**Detail:**
+
+**#1493 — docs(adr): stale Target version lines.** PR #1492 reconciled the
+`Status:` line of 10 ADRs against shipped reality; the `Target version:`
+lines remain stale (e.g. ADR-008 reads "v0.7.0 candidate" but shipped in
+v0.5.1). Update or remove the `Target version:` line so header metadata
+matches the reconciled `Status:`. Kept out of #1492 per Action #1079.
+
+**#1495 — 2 low-severity CodeQL note alerts.** Deferred from the unit-3
+security sweep (PR #1490) as code-quality, not vulnerabilities. CodeQL #2330
+(`py/unused-global-variable`): `TARBALL_EXCLUDES` in `deploy_cli.py:46` is
+orphaned while `_create_tarball` hardcodes two drifted inline lists — wire it
+in + add a regression test. CodeQL #2334 (`py/empty-except`): `checks.py:3057`
+is cosmetic — add an explanatory comment.
+
+**#1496 — accessibility long-tail.** Deferred from unit 4 (PR #1491) per
+Action #1079. The unit shipped the `Y` check foundation (Y001/Y002) + ARIA
+for 8 P0/P1 components. Long tail: P2/P3 component ARIA, keyboard-interaction
+client JS (focus trap, Esc-to-close, roving tabindex), Y003+ checks,
+decorative-icon `aria-hidden` sweep, and `djust_audit` a11y reporting.
+
+**#1497 — README/roadmap doc-rot reconciliation.** Deferred from unit 6
+(PR #1494) per Action #1079 — the docs pass fixed the P0 (`as_live_view()`)
++ critical stale claims. Remaining: full `README.md` Roadmap-section checklist
+reconciliation and a `docs/roadmap.md` currency sweep (distinct from the
+audited `ROADMAP.md`). Lower-priority; not release-blocking.
+
+**#1498 — release procedure lockfile verification.** Two lockfiles showed the
+same staleness class during v1.0.0: `Cargo.lock` workspace versions stale vs
+`Cargo.toml` (#1487) and `uv.lock`'s `djust` self-entry stale vs
+`pyproject.toml`. A release cut bumps the manifest but not the lockfile
+self-entry. Fix: `djust-release` / `RELEASING.md` must refresh + verify all
+lockfile self-entries on version bump. Closes #1487.
+
+**#1499 — left-shift deprecation-stacklevel test.** PR #1488 Stage 7 caught 2
+real `stacklevel` bugs the 14 implementer tests missed — they asserted the
+warning's message + category but never *where it points*. The Stage 5
+implementer prompt (out-of-repo) and `docs/PULL_REQUEST_CHECKLIST.md`
+(in-repo) should require, for every `warn_deprecated`/`warnings.warn` site
+touched, a probe-verified test that the emitted warning's `filename` resolves
+to the caller's module.
+
+**#1500 — doc-snippet smoke test.** PR #1494 caught a P0 README bug
+(`CounterView.as_live_view()` never existed) plus stale claims. Fix: a
+doc-snippet smoke test that extracts fenced Python blocks from
+`README.md`/`QUICKSTART.md` and import/AST-checks them; make
+mechanically-derivable claims self-checking (min-Django-version vs
+`pyproject.toml`, JS-size vs measured bundle); lint doc examples against
+djust's own security/style rules.
+
+**#1501 — close the ADR-status drift loop.** PR #1492 reconciled 10 ADRs
+stale at `Status: Proposed` because nothing in the feature pipeline flips an
+ADR's status when its feature ships. Fix: add an ADR-status prompt to the
+Documentation stage / `djust-release`, plus a `djust_check`-style audit
+cross-referencing `docs/adr/*.md` `Status:`/`Target version:` against git
+history + ROADMAP, runnable in CI.
+
+**#1502 — Stage 4 plan-template intent-not-values.** Two v1.0.0 units hit
+Stage-4 plan over-specification: PR #1491's plan pinned `role="button"` on a
+sortable `<th>` (impl correctly diverged); PR #1490's plan mislabeled
+constrained deps as "transitive, unpinned". Fix the `.pipeline-templates/`
+plan-template rules: describe ARIA *intent* not specific `role` values, and
+record constrained-vs-unpinned per target by grepping constraint tables.
+
+**Deferred (not drained into rc2):**
+- **#1489** — re-export `optimistic`/`cache`/`client_state`/`background` from
+  top-level `djust.__all__` — explicitly tagged **v1.1** in the issue;
+  additive API surface, revisit post-1.0.
+- **#1487** — Cargo.lock staleness — currently resolved (all crates at
+  `1.0.0-rc.1` after the rc1 cut); recurrence prevention tracked by #1498.
+
+**Pipeline runner notes:**
+- `/pipeline-run --milestone v1.0.0rc2 --all --group` processes the bucket;
+  items cluster as ADR-hygiene (#1493+#1501), docs (#1497+#1500), process
+  canon (#1498+#1499+#1502), and code fixes (#1495, #1496 solo — L-effort).
 
 ## Released: v0.9.1 (2026-04-30)
 
