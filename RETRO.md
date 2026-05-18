@@ -296,6 +296,78 @@ issue or be explicitly closed with a reason.
 | 254 | Implementer-subagent prompt must mandate gate-the-change-off tautology self-test | Retro v0.9.7-2 (finding #2) | #1468 | Closed | **Resolved in v0.9.7-3 PR #1469** — landed `docs/PULL_REQUEST_CHECKLIST.md` Test Quality bullet + CLAUDE.md "Process canonicalizations from v0.9.7-2 retro arc" section with the PR #1466 4/7 first-pass case study. First non-trivial application immediately followed in PR #1470 (Stage 5 implementer's gate-off sabotaged `git add $STAGED` → recovery test caught it at `assert status == ""`). Canon landed at the right shape. Out-of-repo follow-up: the implementer-subagent prompt template in the pipeline-run skill repository should incorporate the same Verification-section step. |
 | 255 | LiveComponent vs sticky-child LiveView event-routing distinction (canon) | Retro v0.9.7-3 (#1467 investigation) | #1471 | OUT-OF-REPO | **Closed for djust-repo (v0.9.7-3 PR #1472)** — CLAUDE.md "Process canonicalizations from v0.9.7-3 retro arc" section documents that LiveComponent embedded children (`component_id`-routed) and sticky-child LiveViews (`view_id`-routed) are distinct mechanisms with different persistence semantics. Confusion between the two cost ~1hr of code-path tracing during #1467. Follow-up architectural work (sticky-child WS state persistence with LOAD-time discovery) tracked in #1471 for v0.10.0+. |
 | 256 | Shell tools that process git output default to NUL-delimited + bash-array + quoted expansion | Retro v0.9.7-3 (PR #1470 Stage 11 finding #1) | #1473 | Closed | **Resolved in v0.9.7-3 PR #1476** — landed `docs/PULL_REQUEST_CHECKLIST.md` Shell Scripts Processing Git Output section under Code Quality. Includes the macOS bash 3.2 compatible NUL-delimited read pattern + quoted array expansion + `--` separator on `git add`. The v0.9.7-3 retro's only Open Item is now closed; no carryover into v0.9.7-4+. |
+| 257 | Release procedure must refresh + verify all lockfile self-entries on version bump | Retro v1.0.0 (PR #1486 + #1490) | #1498 | Open | Two lockfiles drifted behind their manifests across release cuts — `Cargo.lock` (#1486; also #1487) and `uv.lock` self-entry (#1490). Fix: `djust-release` step to regenerate+stage both lockfiles + a CI self-entry-vs-manifest check. |
+| 258 | Left-shift deprecation-migration stacklevel test to Stage 5 implementer | Retro v1.0.0 (PR #1488) | #1499 | Open | Stage 7 caught 2 `stacklevel` bugs the implementer tests missed (asserted message text, not frame). Per-call-site "warning points at caller's frame" test, probe-verified. |
+| 259 | Doc-snippet smoke test + mechanically-derivable doc-claim assertions | Retro v1.0.0 (PR #1494) | #1500 | Open | PR #1494 caught a P0 README bug (`as_live_view()` never existed) + stale claims. Extract+check fenced code blocks; assert version/size claims against source. |
+| 260 | Close the ADR-status drift loop — flip Status to Accepted when a feature ships | Retro v1.0.0 (PR #1492) | #1501 | Open | 10 ADRs stale "Proposed" across ~5 releases. Documentation-stage prompt + a `djust_check` ADR-status audit. |
+| 261 | Stage 4 plan-template — describe intent, not specific values (ARIA roles, dep constraints) | Retro v1.0.0 (PR #1491 + #1490) | #1502 | Open | Plan over-specified `role="button"` (impl correctly diverged) and mislabeled constrained deps "unpinned". |
+
+## v1.0.0 — Release Readiness (PRs #1486, #1488, #1490, #1491, #1492, #1494)
+
+**Date**: 2026-05-17
+**Scope**: The v1.0.0 milestone — six focused units taking djust from the v0.9.x bake to a 1.0 SemVer stability commitment. Scoped by a `/pipeline-strategy` deep session (Path 3: Accessibility-in, Dead-View-out — see `docs/strategy-sessions/2026-05-17-v1.0.0-readiness.md`) after a `/pipeline-roadmap-audit` (PR #1484) made the roadmap truthful and a milestone-defining PR (#1485) captured the plan. Units: (1) Rust template `is`/`is not` operator fix (#1483); (2) API-stability + deprecation policy; (3) pre-1.0 dependency security sweep; (4) framework-wide Accessibility (ARIA/WCAG); (5) ADR status reconciliation; (6) 1.0 documentation pass.
+**Tests at close**: ~4290 Python + 816 Rust + 1572 JS; ~118 new across the milestone (22 template-identity, 22 deprecation, 74 accessibility). No regression at close.
+
+### What We Learned
+
+**1. Lockfile staleness across release cuts is a recurring, cross-lockfile defect.**
+Unit 1 (#1486) hit `Cargo.lock` stale at `0.9.7-rc.3` vs `Cargo.toml` `0.9.7`; unit 3 (#1490) hit the *same class* in `uv.lock` (the `djust` self-entry stale at `0.9.5rc3`). A release cut bumps the manifest but the lockfile self-entry isn't refreshed, so the lock drifts behind across multiple releases until an unrelated PR pays the friction. Two distinct lockfiles, one root cause.
+
+**Action taken**: Open — tracked in Action Tracker #257 (GitHub #1498).
+
+**2. Deprecation-migration stacklevel correctness needs a per-call-site, frame-pointing test — at Stage 5, not Stage 7.**
+Unit 2 (#1488) Stage 7 caught 2 real `stacklevel` bugs the implementer's 14 tests missed: the tests asserted the warning's message text and category but never *where it points*. Frame depth is call-site-specific (helper wrappers, metaclasses each add frames), so one "the helper works" test doesn't generalize. The fix added 4 per-site, probe-verified regression tests — but a stage later than it should have been caught.
+
+**Action taken**: Open — tracked in Action Tracker #258 (GitHub #1499).
+
+**3. Docs ship unverified — code claims and snippets rot silently between releases.**
+Unit 6 (#1494) caught a P0 README bug — the Getting Started walkthrough called `CounterView.as_live_view()`, a method that never existed — plus stale claims (Django version, JS bundle size, a `print(f"...")` anti-pattern in an example). Unit 1 caught docs missing `is`/`is not`; unit 2's Stage 11 caught a doc citing a not-yet-filed issue. Recurring across three units: nothing mechanically verifies doc claims or executes doc snippets.
+
+**Action taken**: Open — tracked in Action Tracker #259 (GitHub #1500).
+
+**4. The feature pipeline never closes the ADR-status loop.**
+Unit 5 (#1492) found 10 ADRs stale `Status: Proposed` although their features had shipped — drift accumulated across ~5 releases because nothing flips an ADR's status to `Accepted` when its feature lands. The reconciliation had to happen as a pre-1.0 bulk sweep instead of incrementally.
+
+**Action taken**: Open — tracked in Action Tracker #260 (GitHub #1501).
+
+**5. Stage 4 plans over-specify concrete values where they should describe intent.**
+Unit 4 (#1491): the plan pinned `role="button"` on a sortable `<th>`; the implementation correctly diverged (`role="button"` would strip the `columnheader` table semantics), leaving the plan stale and forcing Stage 11 to reconcile. Unit 3 (#1490): the plan labeled constrained transitive deps "unpinned", missing the `[tool.uv] constraint-dependencies` floors. Both are Stage-4 plan-accuracy gaps where the plan committed to a specific value before checking the authoritative source.
+
+**Action taken**: Open — tracked in Action Tracker #261 (GitHub #1502).
+
+### Insights
+
+- **Six units, six PRs, zero post-merge fixes.** Every unit shipped as a single reviewable PR through its own pipeline; all 🔴/🟡 findings were caught and fixed before merge.
+- **The two-commit shape + gate-off self-test held across all four code units** (#1486, #1488, #1490, #1491) with no `[Unreleased]` cross-edit collision — now the reliable default.
+- **The `DOCS_ONLY` fast lane works.** Units 5 and 6 skipped Stages 6/7/8 via Change Detection while still running the load-bearing Stage 4/11 — a docs unit lands without paying for test infrastructure it doesn't need.
+- **The pipeline gates earned their keep.** Stage 4 (reproducer-first), Stage 6 (stale-test detection), Stage 7 (2 stacklevel bugs), Stage 11 (P0 README bug, plan-vs-impl divergence, non-existent-issue citation) each caught real defects inspection alone would have shipped.
+- **An L-effort unit fit one PR via an explicit Stage 4 scope cut** (unit 4 — 14 candidate components held to foundation + 8 in-PR, long tail to follow-ups #1496). Action #1079 working as intended.
+- **A pre-1.0 docs pass is real release work, not a footnote** — unit 6 caught a P0. Worth repeating as a first-class milestone unit for future majors.
+
+### Review Stats
+
+| Metric | #1486 | #1488 | #1490 | #1491 | #1492 | #1494 | Total |
+|--------|-------|-------|-------|-------|-------|-------|-------|
+| Pipeline | bugfix-14 | feat-14 | feat-14 | feat-14 | docs | docs | — |
+| Tests added | 22 | 22 | 0 | 74 | 0 | 0 | 118 |
+| Defects caught + fixed pre-merge | 0 | 2 | 0 | 1 | 0 | 0 | 3 |
+| Post-merge fixes | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
+
+### Process Improvements Applied
+
+**CLAUDE.md**: No new canon sections this milestone — the 5 findings are tracked as Action Tracker rows #257–#261 for dedicated follow-up PRs rather than canonicalized inline.
+**Pipeline template**: None this milestone.
+**Checklist**: None this milestone.
+**Skills**: `/pipeline-roadmap-audit` and `/pipeline-strategy` were exercised end-to-end to scope the milestone (PRs #1484, #1485).
+
+### Open Items
+
+- [ ] Lockfile self-entry sync on release — Action Tracker #257 (GitHub #1498)
+- [ ] Stage-5 deprecation stacklevel test — Action Tracker #258 (GitHub #1499)
+- [ ] Doc-snippet smoke test — Action Tracker #259 (GitHub #1500)
+- [ ] ADR-status drift loop — Action Tracker #260 (GitHub #1501)
+- [ ] Stage 4 plan intent-not-values — Action Tracker #261 (GitHub #1502)
+- Deferred-findings issues filed during the milestone: #1487, #1489, #1493, #1495, #1496, #1497.
 
 ## v0.9.7-3 — Canon + tooling follow-ups + investigation-class close (PRs #1469, #1470, #1472)
 
