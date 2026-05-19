@@ -294,27 +294,37 @@ CI green, 0 🔴 across the milestone. #1471 closed by #1528. Pending:
 `/pipeline-retro --milestone v1.0.0rc4` (milestone retrospective) and
 `/djust-release 1.0.0rc4` (which also flips ADR-018 `Proposed → Accepted`).
 
-### Phase 2 — final pre-1.0 cleanup (#1432, #1489, #1522, #1523)
+### Phase 2 — VDOM diff fix + final pre-1.0 cleanup (#1529, #1432, #1489, #1522, #1523)
 
-> Added 2026-05-18. The four remaining tracked post-rc3 issues, pulled out of
-> the v1.1.0 follow-up bucket so v1.0.0 final ships with the post-1.0 backlog
-> drained instead of carrying it into the first minor. #1434 (native async
-> ORM) is **not** included — it is hard-blocked on psycopg3 landing async
-> support and cannot be closed until that dependency ships; it stays in the
-> `v1.1.0` milestone below.
+> Added 2026-05-18; #1529 added 2026-05-19. The four remaining tracked
+> post-rc3 issues plus #1529 (a VDOM diff correctness bug found post-rc3),
+> pulled into rc4 so v1.0.0 final ships with the post-1.0 backlog drained and
+> no known core-diff bug. #1434 (native async ORM) is **not** included — it is
+> hard-blocked on psycopg3 landing async support and cannot be closed until
+> that dependency ships; it stays in the `v1.1.0` milestone below.
 
-*Goal:* Drain every closeable post-rc3 follow-up into rc4, so v1.0.0 final's
-only remaining open issue is the one genuinely blocked on an upstream
-dependency.
+*Goal:* Drain every closeable post-rc3 follow-up into rc4 — including the
+#1529 diff bug — so v1.0.0 final ships with no known correctness regression
+and its only remaining open issue is the one genuinely blocked upstream.
 
 | Priority | Issue | Summary |
 |---|---|---|
+| **P0** | #1529 | bug — VDOM incremental diff mis-paths `SetText` patches when 2+ `{{ }}` text values change in one update |
 | **P2** | #1522 | a11y phase 2 — keyboard-interaction client JS (focus trap, Esc-to-close, roving tabindex) |
 | **P2** | #1523 | a11y phase 2 — surface accessibility findings in `djust_audit` |
 | **P2** | #1432 | Declare `djust._rust` free-threaded-safe so 3.13t/3.14t users keep no-GIL |
 | **P3** | #1489 | Re-export optimistic/cache/client_state/background from top-level `djust.__all__` |
 
 **Detail:**
+
+**#1529 — VDOM diff mis-paths `SetText` patches.** When 2+ dynamic `{{ }}`
+text values change in a single update, `render_with_diff()` emits `SetText`
+patches that all carry the *first* changed node's path — so a page updates
+only its first dynamic value and later ones are mis-pathed onto it. The full
+`render()` path is correct; the defect is in the incremental diff. Confirmed
+on 1.0.0rc3 / current `main` with a self-contained reproducer, and observed
+live over a real WebSocket. Release-blocking correctness bug — drains first
+as a bugfix pipeline ahead of the four cleanup issues.
 
 **Accessibility phase 2 (#1522 + #1523).** PR #1521 shipped slice 1 of the
 #1513 a11y long-tail (P2/P3 component ARIA + decorative-icon sweep) and
@@ -337,12 +347,12 @@ final at GA rather than growing in the first minor.
 
 **Pipeline runner notes:**
 - `/pipeline-drain --milestone v1.0.0rc4 --group` — Phase 1's three ADR-018
-  iterations are already merged; the drain picks up the four Phase-2 issues.
-  #1522 + #1523 cluster as the a11y-phase-2 group; #1432 and #1489 are solo
-  small PRs.
+  iterations are already merged; the drain picks up the five Phase-2 issues.
+  #1529 is a standalone bugfix pipeline and drains first (P0). #1522 + #1523
+  cluster as the a11y-phase-2 group; #1432 and #1489 are solo small PRs.
 
-**Status (2026-05-18):** Phase 2 staged. Phase 1 complete (#1526/#1527/#1528
-merged). Drain pending.
+**Status (2026-05-19):** Phase 2 staged (#1529 added as a release-blocking
+bugfix). Phase 1 complete (#1526/#1527/#1528 merged). Drain in progress.
 
 ## Planned: v1.1.0 — Post-1.0 follow-ups
 
