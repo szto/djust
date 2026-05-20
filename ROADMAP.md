@@ -480,13 +480,13 @@ threads, PyPI download patterns, GH issue inflow, downstream consumer
 reports). Then re-run `/pipeline-strategy --deep` with real data to pick the
 v1.1.x headline direction.
 
-**Post-rc6 bug reports (added 2026-05-20 — downstream consumer surfaced 3 issues against 1.0.0rc4):**
+**Post-rc6 bug reports (added 2026-05-20 — downstream consumer surfaced 3 issues against 1.0.0rc4; all FIXED 2026-05-20):**
 
 | Priority | Issue | Summary |
 |---|---|---|
-| **P0** | #1552 | **VDOM diff DOUBLES subtree on `{% if %}/{% elif %}` + `{% include %}` swap** — explicit regression from 0.9.6rc2; downstream user (NYC Claims) has downgraded production. Most severe of the three. |
-| **P1** | #1550 | **VDOM diff fails to insert subtree on `{% if %}` flip** — server-driven re-render doesn't swap branches; user has a `d-none` toggle workaround. Likely related root-cause to #1552. |
-| **P1** | #1551 | **Multi-line `{# ... #}` comment handling — Rust engine vs Django classical disagree** — follow-up to #1423; templates that render via WS path crash via `client.get()` / Django's debug error renderer. Silent footgun for CI / error paths. |
+| ~~**P0**~~ | ~~#1552~~ | ~~**VDOM diff DOUBLES subtree on `{% if %}/{% elif %}` + `{% include %}` swap**~~ — ✅ **fixed in PR #1555** (dj-id counter collision; root cause: thread-local counter divergence after thread handoff / msgpack roundtrip, unmasked by #1538). PR #1553 pinned the diff-layer invariants and disconfirmed the original diff-layer hypothesis. |
+| ~~**P1**~~ | ~~#1550~~ | ~~**VDOM diff fails to insert subtree on `{% if %}` flip**~~ — ✅ **fixed in PR #1555** (same dj-id counter collision as #1552; one fix closes both). |
+| ~~**P1**~~ | ~~#1551~~ | ~~**Multi-line `{# ... #}` comment handling — Rust engine vs Django classical disagree**~~ — ✅ **fixed in PR #1554** (new `djust.template.loaders.FilesystemLoader` + `AppDirectoriesLoader` preprocess `{# ... #}` blocks out before Django classical's tokenizer sees them). |
 
 **Cleanup + pre-reqs (ships during soak — any 1.1 path needs these):**
 
@@ -527,10 +527,17 @@ full menu. The decision between them is gated on launch-feedback data.
 
 **Acceptance for v1.1.0 final:**
 
-- [ ] **Post-rc6 bugs above (#1550, #1551, #1552) fixed and merged.** Decide
-      release-line landing: an rc7 (most likely given #1552 is a regression
-      that downstream is downgrading for), OR direct to 1.0.0 GA, OR
-      fast-follow as 1.0.1. The strategy depends on whether 1.0.0 has cut.
+- [x] ~~Post-rc6 bugs above (#1550, #1551, #1552) fixed and merged.~~ ✅
+      **All three closed 2026-05-20** via PRs #1553 (test pin + disconfirmation),
+      #1554 (#1551 fix), #1555 (#1550 + #1552 combined fix). Release-line decision
+      pending — see acceptance row below.
+- [ ] **Release-line decision for post-rc6 fixes:** cut **v1.0.0rc7** (most
+      likely, given #1552 is a P0 regression that downstream (NYC Claims) has
+      downgraded production for — rc7 lets the reporter re-upgrade and dogfood
+      before GA), OR direct to **v1.0.0 GA** with these fixes included, OR
+      hold the fixes for **v1.0.1** fast-follow. Current commits on `main`
+      since rc6: PR #1553 (test pin) + PR #1554 (#1551 fix) + PR #1555
+      (#1550+#1552 fix). Recommend rc7 for one more soak cycle.
 - [ ] 1.0.0 GA tag cut and PyPI publish verified.
 - [ ] Launch package shipped (blog post + r/django + r/python).
 - [ ] Cleanup + pre-reqs PRs above merged.
