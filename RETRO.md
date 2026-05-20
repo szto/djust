@@ -387,6 +387,10 @@ The pipeline-run skill's "mandatory retro-artifact gate" (filed in the v0.9.x re
 
 None — Action Tracker rows #275 (`djust_live` cargo-test gate) and #276 (sibling serde asymmetry in `actors/messages.rs`) both closed in this milestone (see updates above). No new tracker rows. Zero open issues remain in the repo; zero open Dependabot alerts.
 
+### Forward link → next strategy session
+
+The 2026-05-19 portfolio brainstorm ([docs/strategy-sessions/2026-05-19-v1.1-brainstorm.md](docs/strategy-sessions/2026-05-19-v1.1-brainstorm.md)) and the 2026-05-19 deep strategy session ([docs/strategy-sessions/2026-05-19-v1.1-readiness.md](docs/strategy-sessions/2026-05-19-v1.1-readiness.md)) carried forward from this retro into v1.1.0 scoping. **Outcome: Path E (Defer to launch soak).** The v1.1.0 milestone ships pre-reqs + cleanup during a ~1-2 week 1.0-launch soak, then a `/pipeline-strategy --deep --slug v1.1-post-soak` session picks the headline path (A AI / B DX / C Hybrid / D Debug) with launch feedback data in hand. No directional change vs active ADRs; no new ADR drafted.
+
 ## v1.0.0rc4 — Sticky-child state persistence + final pre-1.0 backlog drain (PRs #1526–#1542)
 
 **Date**: 2026-05-19

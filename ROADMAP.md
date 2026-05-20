@@ -465,33 +465,67 @@ through their own PRs and merged:
 Zero open tracked issues remain. Next: `/pipeline-retro --milestone v1.0.0rc6`
 and `/djust-release 1.0.0rc6`.
 
-## Planned: v1.1.0 — Post-1.0 follow-ups
+## Next: v1.1.0 — Launch-soak interim (cleanup + pre-reqs)
 
-> Created 2026-05-18, rescoped 2026-05-18. The accessibility-phase-2 cluster
-> (#1522/#1523), the free-threaded-safe declaration (#1432), and the
-> top-level re-export polish (#1489) were pulled forward into the
-> `v1.0.0rc4` milestone above (Phase 2) so v1.0.0 final ships with the
-> post-rc3 backlog drained. This milestone now holds only the work that
-> genuinely cannot land in the 1.0 line.
+> Scoped 2026-05-19 by `/pipeline-strategy --deep` (see
+> [`docs/strategy-sessions/2026-05-19-v1.1-readiness.md`](docs/strategy-sessions/2026-05-19-v1.1-readiness.md)).
+> The strategy session presented 5 paths and recommended **Path E — Defer to
+> launch soak**: refuse to commit a headline 1.1 direction (AI / DX / Platform
+> / Debug) before the 1.0.0 GA launch produces real adoption data. User
+> confirmed; no directional change vs active ADRs.
 
-*Goal:* Track post-1.0 follow-ups. As of the v1.0.0rc5 audit, the one issue
-that was parked here (#1434) has been audited and is recommended for closure
-— this milestone is currently empty pending that decision.
+*Goal:* Cut 1.0.0 GA. Run pre-reqs + cleanup PRs in parallel during a ~1-2
+week launch soak. Gather launch feedback (r/django + r/python comment
+threads, PyPI download patterns, GH issue inflow, downstream consumer
+reports). Then re-run `/pipeline-strategy --deep` with real data to pick the
+v1.1.x headline direction.
+
+**Cleanup + pre-reqs (ships during soak — any 1.1 path needs these):**
 
 | Priority | Issue | Summary |
 |---|---|---|
-| ~~**P2**~~ | ~~#1434~~ | ~~Native async ORM — replace `sync_to_async(Model.objects.X)` with native async~~ — audited in v1.0.0rc5; recommended for closure |
+| **P1** | (new) | **H5** — Docs site versioning (`docs.djust.org/v1.0/`, `docs.djust.org/v1.1/` selectors); load-bearing now that 1.0 GA is cut |
+| **P2** | #1456 | **H1** — Extend wire-protocol snapshot suite to remaining ~22 frame shapes (filed during rc6 retro) |
+| **P2** | (new) | **D8** — `djust audit` as GitHub Action — run existing audits on PRs, post findings as comments |
+| **P2** | (new) | **D10** — Inline benchmarks in dev mode — surface per-render timing in the debug panel (cheap; surfaces existing data) |
+| **P2** | (new) | **E1** — First-class DRF / django-ninja interop — pages with both reactive UI and JSON API in one app; mostly docs + integration tests |
+| **P3** | (new) | **H2** — `#1545` integration-test follow-up — `RequestFactory`-driven snapshot path (reviewer's deferred Stage 11 question) |
+| **P3** | (new) | **H3** — Free-threaded ecosystem follow-up — track psycopg2/orjson/etc readiness; flip `continue-on-error: true` off the `py3.14t` CI leg when their wheels ship |
+| **P3** | (new) | **H4** — Archive 14 stale `.pipeline-state/*.json` leftovers (process hygiene; not user-visible) |
 
-**Detail:**
+**Deferred until post-launch-soak re-strategize:** A (AI-Ready), B (DX),
+C (Hybrid), D (Debug & Time-Travel) — see strategy session doc for the
+full menu. The decision between them is gated on launch-feedback data.
 
-**#1434 — native async ORM (audited, recommended for closure).** The
-v1.0.0rc5 audit ([docs/audits/async-orm-2026-05.md](docs/audits/async-orm-2026-05.md))
-found the issue's premise does not hold — there are no `sync_to_async(Model.objects.X)`
-call sites to migrate (0 direct, 3 indirect connection-scoped auth/tenant
-helpers out of 126 total), and the measured migratable win is 0% of
-per-event latency, below the issue's own 5% deprioritize gate. The audit is
-the resolution artifact; #1434 should be closed (see the recommendation
-posted on the issue). No drainable work remains in this milestone.
+**Pipeline runner notes:**
+
+- `/pipeline-drain --milestone v1.1.0` after 1.0 GA cuts — picks up the
+  cleanup + pre-reqs above.
+- Soak window: ~1-2 weeks post-launch. Enforce by re-running
+  `/pipeline-strategy --deep --slug v1.1-post-soak` once feedback has
+  accumulated.
+- If soak feedback strongly favors a headline path (e.g., "people are
+  begging for autocomplete on `dj-click`" → Path B), the re-strategize is
+  a 1-stage decision. If ambiguous, the brainstorm's default
+  (Path A — AI-Ready) becomes the headline.
+
+**Acceptance for v1.1.0 final:**
+
+- [ ] 1.0.0 GA tag cut and PyPI publish verified.
+- [ ] Launch package shipped (blog post + r/django + r/python).
+- [ ] Cleanup + pre-reqs PRs above merged.
+- [ ] `/pipeline-strategy --deep --slug v1.1-post-soak` run with launch
+      data; headline path chosen.
+- [ ] Headline path executed; v1.1.0 cut via `/djust-release 1.1.0`.
+
+**Background — the menu the post-soak re-strategize will choose from:**
+The full 40-candidate brainstorm is at
+[`docs/strategy-sessions/2026-05-19-v1.1-brainstorm.md`](docs/strategy-sessions/2026-05-19-v1.1-brainstorm.md);
+the 4 commit-now paths it produced (A AI / B DX / C Hybrid / D Debug) and
+the rationale for each are in
+[`docs/strategy-sessions/2026-05-19-v1.1-readiness.md`](docs/strategy-sessions/2026-05-19-v1.1-readiness.md).
+None of these are committed — they're the menu the re-strategize chooses
+from once launch data weights the decision.
 
 ## Released: v0.9.1 (2026-04-30)
 
