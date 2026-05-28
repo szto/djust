@@ -3435,6 +3435,25 @@ Three v0.8.6 retro patterns (#1125, #1124, #1123) are also still open as canon i
 
 ---
 
+### Milestone: v1.0.0rc14 — open-issue drain (#1635–1645)
+
+*Goal:* Drain the post-rc13 open-issue bucket (reported against djust 1.0.0rc13, several from MAX Companion + downstream consumers). Bug-fixes and small tech-debt; each < 1 day.
+
+**Priority Matrix**
+
+| Priority | Issue | Summary | Milestone |
+|---|---|---|---|
+| **P0** | check_object_permission async-wrap asymmetry (#1638) | Per-event path calls sync `check_object_permission` from `async def` while mount wraps in `sync_to_async`; every URL-bound LiveView with sync ORM in `get_object()` reports "Access denied" on the first event | v1.0.0rc14 |
+| **P1** | client.js re-eval SyntaxError on live_redirect/bfcache (#1635) | `_TEXT_INPUT_TYPES has already been declared` when client.js re-evaluates on bfcache restore / live_redirect | v1.0.0rc14 |
+| **P1** | `djust new` demo tables missing on deploy (#1637) | Scaffold uses run-syncdb instead of makemigrations and ships no `migrations/__init__.py` | v1.0.0rc14 |
+| **P1** | VDOM comment-filter mismatch (#1640) | `getSignificantChildren` counts ALL comments but `getNodeByPath` counts only dj-if comments → index mismatch with regular HTML comments | v1.0.0rc14 |
+| **P2** | Fold per-turn invariants into send/flush helpers (#1645) | `_recovery_html` arming is hand-copied across send sites (drift risk, cf. #1639/#1644) | v1.0.0rc14 |
+| **P2** | HTTP→WS dj-id parity test harness (#1642) | Test-infra: assert HTTP-GET-render and WS-mount-render assign matching dj-ids (would test the #1641 hypothesis) | v1.0.0rc14 |
+
+**Not in this bucket:** #1636 (production half fixed in PR #1639; remainder tracked by #1641), #1641 (blocked on reporter's minimal repo).
+
+---
+
 ## Investigate & Decide
 
 Open questions that inform future direction:
