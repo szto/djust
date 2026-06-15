@@ -3661,6 +3661,12 @@ the old placement still serves during blue/green). `djust deploy` should print
 
 ---
 
+### Milestone: v1.0.5-5 — sticky-child recovery state-loss (P0 data loss) (drain bucket → ships in 1.0.5)
+
+*Goal:* Fix the P0 data-loss bug #1813 — an `html_recovery` on a live connection wipes an embedded sticky child's user-interacted state back to `mount()` defaults. Ships in 1.0.5 (warrants a 1.0.5rc5).
+
+**#1813 — Prerender + embedded sticky child: first parent patch misses `dj-id` → `html_recovery` → sticky-child state reset (P0, bug, DATA LOSS)** — On an HTTP-prerendered page embedding `{% live_render "Child" sticky=True %}`, the first parent patch carries a `SetAttr data-djust-embedded` on the child wrapper addressed by **path** (the prerender `skipMountHtml` morph, #1610, never stamps a `dj-id` on that wrapper — fix (a), same class as #1678). If the child's subtree drifted (user interacted), the path no longer resolves → patch fails → `html_recovery`. The recovery re-renders the parent, re-running `{% live_render sticky=True %}` → the child re-mounts to `mount()` defaults → **the user's interactions are silently discarded** (fix (b), the fundamental fix — *any* recovery cause wipes sticky state; #1471 covered WS-reconnect but not live-connection recovery). Reproduce-first against a real WebsocketCommunicator (drift child → trigger recovery → assert child state preserved, not mount defaults). Prefer fix (b) (data-loss cure for all recovery causes); add (a) if it cleanly removes the avoidable trigger.
+
 ### Milestone: v1.0.5-4 — system-check DX + worktree tooling drain (drain bucket → ships in 1.0.5)
 
 *Goal:* Drain two post-rc4 DX/tech-debt issues: a misleading + unsuppressible T004 system check, and the worktree pre-push gap left after #1798. Ships in 1.0.5.
