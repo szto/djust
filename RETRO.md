@@ -342,10 +342,61 @@ issue or be explicitly closed with a reason.
 | 300 | Read-only review subagent must never mutate the main checkout / `core.bare` (use `isolation: worktree` or read-only `gh pr diff`) | Retro v1.0.5-2 / PR #1804 | — | Closed | **Resolved this retro** (CLAUDE.md "Process canonicalizations from v1.0.5-2 retro arc"). Self-applied one PR later in #1806's read-only review. Verify `git config core.bare` after any subagent. |
 | 301 | Worktree pre-push tests the MAIN source tree (editable install), not the linked worktree — still forces `--no-verify` | Retro v1.0.5-2 / PR #1804 (follow-up to #1796) | #1810 | Closed | **Resolved in v1.0.5-4** (PR #1812 — `run-with-venv-python.sh --worktree-pythonpath` prepends the worktree's `python/` (beats the plain `djust.pth`) + symlinks the main `.so`, so a worktree pre-push tests the worktree's source). GitHub #1810 closed. |
 | 302 | Concurrency tests assert a logical ordering invariant (interval overlap), never a wall-clock duration/ratio | Retro v1.0.5-5 / PR #1815 (#1795) | — | Closed | **Resolved this retro** (CLAUDE.md "Process canonicalizations from v1.0.5-4 + v1.0.5-5 retro arc"). #1795 rewritten to `max(start)<min(end)` + a serial gate-off sibling; ends a two-release flaky recurrence. |
-| 303 | `_recovery_version` can go stale vs `_last_sent_version` across non-arming send paths | Retro v1.0.6-1 / PR #1816 review | #1817 | Open | Pre-existing 🟡, low severity (extra round-trip, not data loss); not CI-enforced. Watch-don't-fix until observed. |
-| 304 | Modularize `checks.py` (4,221 LOC) into submodules | Issue #1822 (post-S007) | #1822 | Open | Deferred follow-on to the v1.0.6-2 S007 wave; its own single-script-transformation PR (#1312), after #1821 landed. |
+| 303 | `_recovery_version` can go stale vs `_last_sent_version` across non-arming send paths | Retro v1.0.6-1 / PR #1816 review | #1817 | Closed | **Resolved in v1.0.7-1** (PR #1838): structural `_next_version_armed(html)` helper now fronts every render-send path; `_arm_recovery` has one call site, pinned by `test_arm_recovery_is_the_only_arming_mechanism`. Actor path (`use_actors=True`) deferred → Action #308 / #1840. |
+| 304 | Modularize `checks.py` (4,221 LOC) into submodules | Issue #1822 (post-S007) | #1822 | Closed | **Resolved in v1.0.6-4** (PR #1833): split into 8 family submodules; 13 checks + 72 IDs + full import surface preserved, zero test edits (the 6 monkeypatched helpers referenced via `_root`). |
 | 305 | Security validation review must empirically probe ENCODING-bypass variants (consumer decodes after validation) | Retro v1.0.6-2 / PR #1825 | — | Closed | **Resolved this retro** (CLAUDE.md "Process canonicalizations from v1.0.6-1 + v1.0.6-2 retro arc"). #1819 `%2e%2e` bypass caught by the adversarial review's encoded end-to-end probe; fixed in the #1825 fix-pass (`unquote` before the `..` check). |
 | 306 | Latency-SLA benchmark asserts MEDIAN, not outlier-sensitive mean | Retro v1.0.6-2 / commit 49893831 | — | Closed | **Resolved this retro** (CLAUDE.md same arc section; fixed in `49893831`). #1795 outlier-sensitivity family; mean dragged past SLA by GC spikes on a loaded machine while median was well under. |
+| 307 | System check to warn when `dj-view`/`dj-root` is on a table-section element (`<tbody>`/`<tr>`/…) — silently foster-parented to garbage at render time | Retro v1.0.7-1 / #1827 investigation | #1837 | Open | Surfaced closing #1827: a `<tbody dj-view>` template renders as `<html><body>text</body></html>` (all rows dropped), no error. The actionable DX fix the #1827 diff_html flattening pointed at. |
+| 308 | Arm recovery on the actor event path (`use_actors=True`, `websocket.py:3100`) once its `result['html']` shape is verified | Retro v1.0.7-1 / PR #1838 (#1817 punt) | #1840 | Open | The one render-send site PR #1838 left on bare `_next_version()` (arming with possibly-extracted actor HTML would be worse than the LOW drift). PR body "recommended a follow-up" but didn't file it — the retro gate caught the untracked action. |
+
+## v1.0.7-1 — Post-1.0.6 open-issue drain (PRs #1838, #1839)
+
+**Date**: 2026-06-18
+**Scope**: Drained the 3 tractable open issues after 1.0.6 shipped — #1817 (recovery-version staleness, PR #1838), #1830 (flaky dj-transition rAF test, PR #1839), #1827 (diff_html table-fragment flattening, closed-without-code). Held #1561/#1562 (priority:low bug-capture feature epics) for v1.1.0.
+**Tests at close**: full suite green (Python + Rust + JS); 14/14 CI checks on both PRs.
+
+### What We Learned
+
+**1. Reproduce against the REAL code path, not a convenient synthetic harness, before committing to a fix OR a close.**
+#1827 reproduced perfectly when `diff_html` was hand-fed a bare `<tbody>` fragment (table rows flattened to `#text` via html5ever foster-parenting) — it looked like a real P2 VDOM bug. But driving it through the actual render path proved it unreachable: a `<tbody dj-view>` template is foster-parented at *render* time (it renders as `<html><body>text</body></html>`, all rows already gone), so `diff_html` never receives the problematic input from any real view. Investigation-first turned a "fix the differ" task into a close-without-code AND surfaced the genuinely-actionable gap (a view silently rendering to garbage with no error). Extends the Bug-report-triage canon's mechanism axis (#1650/#1638): distrust the reproduction *harness* until it exercises the same path production does.
+**Action taken**: Closed — #1827 closed as investigation-outcome (no production repro); the actionable DX remainder tracked as Action Tracker #307 (GitHub #1837, a system check warning on table-section-rooted views).
+
+**2. A PR that "recommends a follow-up" has not filed one — the recommendation is not the action; the retro gate is the backstop.**
+PR #1838 deliberately left the actor event path (`use_actors=True`, `websocket.py:3100`) on bare `_next_version()` (arming with possibly-already-extracted actor HTML would be worse than the LOW-severity drift) and its body said "Recommend a follow-up issue" — but no issue was filed. Stage 2 of this retro caught the untracked action. The same failure mode the retro classification gate exists for, on the implementer side.
+**Action taken**: Open — filed GitHub #1840, tracked in Action Tracker #308.
+
+**3. The flaky-timing canon extends to real-frame `requestAnimationFrame`; the remedy is a controllable async-primitive stub driven explicitly + an ordering-invariant assertion.**
+#1830 (PR #1839) was the Nth instance of the #302/#306 family ("never assert a pass/fail gate on real timing"). The dj-transition test raced a `setTimeout(0)` microtask flush against the 16 ms rAF fallback; under parallel load the rAF fired first and the start-class assertion saw the already-advanced state. The fix replaced jsdom's timer-backed rAF with an opt-in queue driven by `dom.flushFrame()`, making the test fully synchronous and asserting the ordering invariant (start now; active/end only after a driven frame). Naming `requestAnimationFrame` + the controllable-stub remedy in the canon helps the next author grep for it.
+**Action taken**: Extended the CLAUDE.md flaky-test canon (section "v1.0.6-1 + v1.0.6-2 retro arc", the median-not-mean bullet) with the rAF / controllable-async-primitive-stub case in this retro's commit.
+
+### Insights
+
+- **Structural cure pinned by a single-source-of-truth invariant test.** #1817's `_next_version_armed(html)` helper consolidated arming to one call site, and `test_arm_recovery_is_the_only_arming_mechanism` asserts `_recovery_html` is assigned *only* inside it — so future drift is mechanically impossible, not just currently-absent. A stronger variant of the #1125 count-test pattern; keep reaching for "assert X is the ONLY mechanism" when consolidating parallel paths.
+- **Worktree subagents are unreliable when the change needs the editable install / node_modules** (Python, Rust-with-build, or JS-with-bundle): the `.pth` points at the main checkout, so a worktree's pytest tests the wrong tree (and vitest needs node_modules). This drain processed all three issues serially in the main checkout (one-checkout-one-agent, #180) — #1817 via a focused subagent, #1830 + #1827 inline. (Tracked separately as #1810 for the pre-push angle.)
+- Both code-fix PRs landed 5/5, gate-off-verified, single-pass green. The drain's biggest time-saver was reproduce/investigate-first: #1827's investigation (~20 min) avoided a speculative Rust differ change to the hottest VDOM path.
+
+### Review Stats
+
+| Metric | PR #1838 (#1817) | PR #1839 (#1830) | #1827 | Total |
+|--------|------------------|------------------|-------|-------|
+| Tests added | 5 (1 WS e2e + 4 unit/pin) | 1 rewrite (+ controlledRaf helper) | 0 (investigation) | 6 |
+| 🔴 Findings | 0 | 0 | — | 0 |
+| 🟡 Findings | 0 | 0 | — | 0 |
+| Gate-off verified | yes | yes | n/a | 2/2 |
+| CI failures | 0 | 0 | — | 0 |
+
+### Process Improvements Applied
+
+**CLAUDE.md**: extended the flaky-test canon to name `requestAnimationFrame` + the controllable-async-primitive-stub remedy (this commit).
+**Pipeline template**: none.
+**Checklist**: none.
+**Skills**: none.
+
+### Open Items
+
+- [ ] #1837 — system check for table-section-rooted views — Action Tracker #307 (GitHub #1837)
+- [ ] #1840 — arm recovery on the actor event path — Action Tracker #308 (GitHub #1840)
+- [ ] #1561 / #1562 — bug-capture iter B/C feature epics — held for v1.1.0 (not yet tracked rows; revisit when scoped)
 
 ## v1.0.6-2 — Security + DX drain (PRs #1823, #1824, #1825)
 
@@ -390,7 +441,7 @@ At the 1.0.6rc1 cut, two VDOM-diff benchmarks (median 3.8ms, well under the 5ms 
 
 ### Open Items
 
-- [ ] `checks.py` modularization — Action Tracker #304 (GitHub #1822)
+- [x] `checks.py` modularization — Action Tracker #304 (GitHub #1822) — resolved in v1.0.6-4 (PR #1833)
 
 ## v1.0.6-1 — Consumer-owned VDOM send-version (PR #1816)
 
@@ -430,7 +481,7 @@ The review surfaced that `_recovery_version` can go stale vs `_last_sent_version
 
 ### Open Items
 
-- [ ] Recovery-version staleness — Action Tracker #303 (GitHub #1817)
+- [x] Recovery-version staleness — Action Tracker #303 (GitHub #1817) — resolved in v1.0.7-1 (PR #1838)
 
 ## v1.0.5-5 — Sticky-child recovery P0 + flaky-test hardening (PRs #1814, #1815)
 
