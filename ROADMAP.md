@@ -3661,7 +3661,7 @@ the old placement still serves during blue/green). `djust deploy` should print
 
 ---
 
-### Milestone: v1.0.6-5 — VDOM dj-if duplicate marker id in `{% for %}` loops (#1832) (P0, drops rows; drain bucket → ships in 1.0.6)
+### Milestone: v1.0.6-5 — VDOM dj-if duplicate marker id in `{% for %}` loops (#1832) ✅ SHIPPED (PR #1834) (P0, drops rows; drain bucket → ships in 1.0.6)
 
 *Goal:* Fix `{% if %}` inside `{% for %}` reusing ONE compile-time-ordinal `dj-if` marker id across all iterations → duplicate ids → unpairable `MoveSubtree` (`close marker not found`) → most patches fail → recovery morph drops a row per toggle. Distinct from #1826/#1828 (relative-vs-absolute move decision); this is duplicate *marker ids within a loop*.
 
