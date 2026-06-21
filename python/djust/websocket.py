@@ -2380,12 +2380,29 @@ class LiveViewConsumer(AsyncWebsocketConsumer):
                     snapshot_slug = state_snapshot.get("view_slug", "")
                     if snapshot_slug == view_path:
                         state_dict = None
-                        raw_state = state_snapshot.get("state_json", "{}")
-                        # Fix #6 — hard server-side size cap on inbound
-                        # snapshot JSON. Matches the 64 KB client clamp
-                        # and guards against oversized payloads that
-                        # bypass the client.
-                        if isinstance(raw_state, str) and len(raw_state) > 65536:
+                        # Finding #4 (CWE-345 → CWE-915): the snapshot is
+                        # client-supplied and MUST carry a server HMAC
+                        # signature. ``state_json`` is now the OPAQUE signed
+                        # blob the client echoes back verbatim (see the emit
+                        # path below + 46-state-snapshot.js). Verify the
+                        # signature + TTL + identity (slug + session) BEFORE
+                        # trusting any bytes. An unsigned/forged/tampered/
+                        # expired/cross-context snapshot returns None here and
+                        # falls through to a normal mount() — there is no
+                        # bypass via the legacy plain ``state_json``.
+                        from .security import unsign_snapshot
+
+                        signed_blob = state_snapshot.get("state_json", "")
+                        session_key = getattr(self.view_instance, "_django_session_key", None)
+                        raw_state = unsign_snapshot(signed_blob, view_path, session_key)
+                        if raw_state is None:
+                            # Rejected at the signature/identity/TTL gate.
+                            # unsign_snapshot already logged the reason.
+                            state_dict = None
+                        # Fix #6 — hard server-side size cap on the VERIFIED
+                        # inner snapshot JSON. Matches the 64 KB client clamp
+                        # and guards against oversized payloads.
+                        elif len(raw_state) > 65536:
                             logger.warning(
                                 "state_snapshot state_json too large "
                                 "(%d bytes > 64KB) for %s; ignoring",
@@ -2611,12 +2628,21 @@ class LiveViewConsumer(AsyncWebsocketConsumer):
 
         # Fix #1 — end-to-end wiring for state-snapshot capture.
         # When the view opts in via ``enable_state_snapshot = True`` AND
-        # the master switch is enabled, emit the JSON-serializable
-        # public state alongside the mount frame so the client can
-        # populate ``djust._clientState[<view_slug>]`` for the next
-        # before-navigate capture. Non-opt-in views never have their
-        # state shipped — matches the security posture of the
-        # opt-in-only model.
+        # the master switch is enabled, emit the public state alongside
+        # the mount frame so the client can populate
+        # ``djust._clientState[<view_slug>]`` for the next before-navigate
+        # capture. Non-opt-in views never have their state shipped —
+        # matches the security posture of the opt-in-only model.
+        #
+        # Finding #4 (CWE-345 → CWE-915): the snapshot is now SIGNED with a
+        # ``TimestampSigner`` (keyed on ``SECRET_KEY``) and the OPAQUE signed
+        # blob is what crosses the wire (``state_snapshot_signed``). The
+        # client stores it verbatim and echoes it back unchanged; the restore
+        # path verifies the signature + TTL + identity before applying any
+        # state. This closes the unsigned-snapshot forgery vector — a client
+        # can no longer fabricate ``{"is_admin": true, ...}`` and inject it.
+        # The signature binds the view slug + Django session key so a valid
+        # snapshot cannot be replayed across views or sessions.
         try:
             state_master_on = getattr(settings, "DJUST_STATE_SNAPSHOT_ENABLED", True)
             if state_master_on and getattr(self.view_instance, "enable_state_snapshot", False):
@@ -2624,10 +2650,19 @@ class LiveViewConsumer(AsyncWebsocketConsumer):
                 if callable(snapshot_fn):
                     public_state = await sync_to_async(snapshot_fn)()
                     if isinstance(public_state, dict) and public_state:
-                        response["public_state"] = public_state
+                        from .security import sign_snapshot
+
+                        # Canonical serialization so the signed bytes are
+                        # stable (and match the inner JSON the restore path
+                        # json.loads-es after unsigning).
+                        state_json = json.dumps(public_state, sort_keys=True, separators=(",", ":"))
+                        session_key = getattr(self.view_instance, "_django_session_key", None)
+                        response["state_snapshot_signed"] = sign_snapshot(
+                            state_json, view_path, session_key
+                        )
         except Exception:  # noqa: BLE001 — snapshot emission must never break mount
             logger.exception(
-                "Failed to emit public_state for %s; proceeding without snapshot",
+                "Failed to emit state_snapshot_signed for %s; proceeding without snapshot",
                 sanitize_for_log(view_path),
             )
 

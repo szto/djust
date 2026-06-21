@@ -360,15 +360,19 @@ class LiveViewWebSocket {
                 this.viewMounted = true;
                 if (globalThis.djustDebug) console.log('[LiveView] View mounted: %s', String(data.view));
 
-                // Fix #1 — stash server-emitted public view state so the
-                // state-snapshot capture on next before-navigate has
-                // something to serialize. The server includes
-                // ``public_state`` only when ``enable_state_snapshot``
-                // is True on the view class; non-opt-in views never
-                // have state cached by the SW.
-                if (data.public_state && typeof data.public_state === 'object' && data.view) {
+                // Fix #1 / Finding #4 — stash the server-emitted SIGNED
+                // state-snapshot blob so the state-snapshot capture on the
+                // next before-navigate can echo it back verbatim. The server
+                // includes ``state_snapshot_signed`` (an opaque
+                // TimestampSigner blob) only when ``enable_state_snapshot``
+                // is True on the view class; non-opt-in views never have
+                // state cached. The blob is OPAQUE — we store it as-is and
+                // never re-serialize it, so the server signature stays valid
+                // on the round-trip. Re-serializing would strip the signature
+                // and the server would (correctly) reject the snapshot.
+                if (typeof data.state_snapshot_signed === 'string' && data.state_snapshot_signed && data.view) {
                     if (!window.djust._clientState) window.djust._clientState = {};
-                    window.djust._clientState[data.view] = data.public_state; // codeql[js/remote-property-injection] -- data.view is a server-sent view name, not arbitrary user input
+                    window.djust._clientState[data.view] = data.state_snapshot_signed; // codeql[js/remote-property-injection] -- data.view is a server-sent view name, not arbitrary user input
                 }
 
                 // Remove dj-cloak from all elements (FOUC prevention)

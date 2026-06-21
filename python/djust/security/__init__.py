@@ -45,6 +45,13 @@ from .error_handling import (
 )
 from .event_guard import is_safe_event_name
 from .json_script import escape_json_for_script
+from .state_snapshot import (
+    sign_snapshot,
+    unsign_snapshot,
+    get_max_age,
+    SNAPSHOT_SALT,
+    DEFAULT_MAX_AGE,
+)
 
 __all__ = [
     # Attribute guard
@@ -65,4 +72,10 @@ __all__ = [
     "is_safe_event_name",
     # Script-safe JSON
     "escape_json_for_script",
+    # Signed state-snapshot envelope (CWE-345/CWE-915 fix)
+    "sign_snapshot",
+    "unsign_snapshot",
+    "get_max_age",
+    "SNAPSHOT_SALT",
+    "DEFAULT_MAX_AGE",
 ]
