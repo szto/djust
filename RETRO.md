@@ -349,11 +349,58 @@ issue or be explicitly closed with a reason.
 | 307 | System check to warn when `dj-view`/`dj-root` is on a table-section element (`<tbody>`/`<tr>`/…) — silently foster-parented to garbage at render time | Retro v1.0.7-1 / #1827 investigation | #1837 | Open | Surfaced closing #1827: a `<tbody dj-view>` template renders as `<html><body>text</body></html>` (all rows dropped), no error. The actionable DX fix the #1827 diff_html flattening pointed at. |
 | 308 | Arm recovery on the actor event path (`use_actors=True`, `websocket.py:3100`) once its `result['html']` shape is verified | Retro v1.0.7-1 / PR #1838 (#1817 punt) | #1840 | Closed | **Investigated in v1.0.7-2, deferred (no code change)**: traced that `result['html']` is the already-extracted/client-ready shape, so arming `_recovery_html` with it would make `handle_request_html` double-strip → corrupt recovery (worse than the LOW drift). Proper fix needs the experimental actor to expose its raw pre-strip render; deferred until `use_actors` graduates. Bare site pinned by `test_every_client_checked_send_path_uses_next_version`. #1840 closed. |
 | 309 | Browser-smoke coverage for downstream interactive paths — runtime breaks (mount-path allowlist; inline-script-under-morph) are invisible to the pytest suite + HTTP smoke; only browser testing of the deployed app catches them | Retro v1.0.7-3+4 / demo dj-view break + #1848 | #1849 | Closed | Browser-smoke harness delivered in v1.0.8-1 PR #1866 (`tests/playwright/test_browser_smoke.py` — hard mount canary + #1848-shape inline-script xfail reproducing the open regression live); shipped non-gating per #1534, promotion to a hard merge gate tracked in #1869. Two real 1.0.7-upgrade breaks (demo `views_old` dj-view; djust.org examples tab/copy) passed the 8237-green suite + HTTP-200 smoke; caught only by driving the live page in a browser. |
-| 310 | Inline `<script>` inside dj-root not executed after the #1610 WS-mount morph — page JS handlers silently never register (1.0.7 regression) | Retro v1.0.7-3+4 / djust.org examples page | #1848 | Open | Fix: re-execute classic `<script>` on the mount morph like the `live_redirect` path (#1635/#1650) already does, OR a system-check warning. Downstream workaround (move JS to a block outside dj-root) applied on djust.org `v0.9.32`. Documented in CLAUDE.md (v1.0.7-3+4 retro arc) + [[project_djust_inline_script_in_djroot]]. v1.0.8-1 added S011 detection + a browser-smoke xfail (PR #1864/#1866); framework fix still pending. |
+| 310 | Inline `<script>` inside dj-root not executed after the #1610 WS-mount morph — page JS handlers silently never register (1.0.7 regression) | Retro v1.0.7-3+4 / djust.org examples page | #1848 | Closed | Fix: re-execute classic `<script>` on the mount morph like the `live_redirect` path (#1635/#1650) already does, OR a system-check warning. Downstream workaround (move JS to a block outside dj-root) applied on djust.org `v0.9.32`. Documented in CLAUDE.md (v1.0.7-3+4 retro arc) + [[project_djust_inline_script_in_djroot]]. **Closed** — framework fix landed in v1.0.8-2 PR #1871 (`window.djust._runInsertedScripts` re-executes classic `<script>` after both mount branches); v1.0.8-1's browser-smoke xfail flips to a hard guard. |
 | 311 | Test-ordering pollution: `tests/unit/test_demo_views.py::TestDemoRegistration` — 4 urlconf-resolution failures under full `-n auto` | PR #1861 / v1.0.8-1 retro | #1862 | Open | Pre-existing; surfaced during T1-A. Passes in isolation; needs the polluter found (urlconf state leak). |
 | 312 | `_get_project_app_dirs()` returns 0 dirs when `manage.py check` runs from inside the djust repo tree (the `/djust/` path filter) — blinds S009/S011 dogfooding | PR #1864 / v1.0.8-1 retro | #1865 | Open | Pre-existing; makes in-repo dogfood of the new checks see 0 app dirs. Dogfood worked via the demo project instead. |
 | 313 | Per-model `djust_serializable_fields` allowlist can re-expose the sensitive-field floor (`password`/`is_superuser`/`is_staff`) — allowlist wins over `_ALWAYS_EXCLUDED_FIELDS` | PR #1867 / v1.0.8-1 retro | #1868 | Open | Surfaced by writing SECURE_DEFAULTS.md (`serialization.py:362`). Doc now states accurate precedence + WARNING; code-hardening question (make floor unconditional?) tracked here. |
 | 314 | Promote the Playwright browser-smoke to a hard merge gate once runner-green (#1534) — flip `continue-on-error` + add to the `test-summary` AND-condition (#1713); flip the #1848 xfail to a hard assertion when the framework fix lands | PR #1866 / v1.0.8-1 retro | #1869 | Open | Shipped non-gating per #1534 (new gate needs a runner-green pass before it blocks). |
+| 315 | `test_mount_batch_with_login_view_does_not_close_shared_socket` is order-fragile under `-n auto` (passes in isolation + 2/3 full runs) | PR #1874 / v1.0.8-2 retro | #1875 | Open | Unrelated pre-existing flaky async test surfaced by WU4's 3-clean-runs gate; kept out of #1862's scope (#1079). Guards the #291 multiplexed-path rule (guard is correct; harness ordering is the flake). |
+
+## v1.0.8-2 — Post-prevention open-issue drain (PRs #1870, #1871, #1872, #1873, #1874)
+
+**Date**: 2026-06-22
+**Scope**: Drained the five actionable open issues left after the v1.0.8-1 prevention program — two render-path correctness regressions (both 1.0.7) and three check/test/serialization hygiene follow-ups surfaced by the prevention work. Run as five parallel worktree-isolated implementers (one per issue, file-disjoint, #180), each with a prescriptive symptom-up brief (root cause + reference pattern + reproduce-first + gate-off + two-commit). All five merged. Excluded #1869 (blocked on a runner-green pass), #1561/#1562 (priority:low feature work).
+**Tests at close**: 8337 pytest (`-n auto`) + 1743 JS (vitest) + the non-gating Playwright smoke.
+
+### What We Learned
+
+**1. A parallel-worktree drain's one guaranteed conflict is the CHANGELOG `[Unreleased]` block — and merging shifts it, so later PRs re-conflict.**
+All five PRs were code-disjoint but every one edited `CHANGELOG.md [Unreleased]`. After the first merge moved that block, the rest went CONFLICTING; #1871 re-conflicted twice as #1870/#1873 landed ahead of it. The mechanical fix at merge time is a *union* resolve (merge current main into the branch, keep ALL entries — dropping an already-merged bullet would silently regress it). The structural fix is a `merge=union` driver so the resolve is automatic.
+
+**Action taken**: Added `.gitattributes` with `CHANGELOG.md merge=union` (+ `RETRO.md`) — a `diff` committed in this retro. Reinforces #180/#1173 (the two-commit shape isolates CHANGELOG to its own commit but does not prevent the `[Unreleased]` collision; union-merge does).
+
+**2. The 3-clean-runs gate (#1174) both fixed the cited pollution AND surfaced an unrelated flaky test.**
+WU4 (#1862) was a pollution-class fix, so the gate ran the full suite 3× under `-n auto`. The #1862 target was green all 3 runs, but RUN 1 exposed a *separate* pre-existing order-fragile async test (`test_ws_auth_close_socket`) — untouched by the PR. Kept out of scope (#1079) and filed.
+
+**Action taken**: Open — tracked in Action Tracker #315 (GitHub #1875).
+
+### Insights
+
+- **Prescriptive symptom-up briefs produced clean first-pass PRs.** All 5 were APPROVE on first review with **zero fix-passes** — a sharp contrast to v1.0.8-1 (3 of 7 needed a fix-pass). The difference: each brief named the root cause, the reference pattern to lift, and mandated reproduce-first + gate-off, so the implementer couldn't ship a plausible-but-wrong or tautological change. Worktree isolation let all 5 run concurrently.
+- **Symptom-up beat the issue's cited fix path twice.** #1848's premise ("#1635/#1650 already re-executes classic scripts") was wrong — that was the framework bundle's IIFE wrap, not user page scripts; no helper existed. #1858 was correctly confirmed as the #1788 parallel-path twin. Both came from the implementer tracing the symptom, not trusting the citation (the Bug-report-triage canon, applied).
+- **#1646 parallel-path twins fixed structurally, not patched.** #1858 routed all runtime render-send frames through one `Transport.next_client_version` hook (not a second copy of the counter logic); #1848 ran the script-re-execution after *both* mount branches; #1862 converged settings mutation onto one restoration mechanism; #1868's single `_field_is_serializable` chokepoint already gated all three callers. The recurring class keeps getting retired at the seam, per the Stage-4 reflex.
+- **Adversarial review stayed read-only (`gh pr diff` / `git show`)** — the #1804 `core.bare` discipline held across all 5; main checkout `core.bare=false` verified throughout.
+
+### Review Stats
+
+| Metric | #1870 | #1871 | #1872 | #1873 | #1874 | Total |
+|--------|-------|-------|-------|-------|-------|-------|
+| Quality | 5/5 | 5/5 | 5/5 | 5/5 | 5/5 | — |
+| 🔴 Findings | 0 | 0 | 0 | 0 | 0 | 0 |
+| 🟡 Findings | 0 | 0 | 0 | 0 | 0 | 0 |
+| Review fix-passes | 0 | 0 | 0 | 0 | 0 | 0 |
+| CHANGELOG re-resolves | 0 | 2 | 0 | 1 | 1 | 4 |
+| CI failures | 0 | 0 | 0 | 0 | 0 | 0 |
+
+### Process Improvements Applied
+
+**`.gitattributes`**: New — `CHANGELOG.md merge=union` + `RETRO.md merge=union` (eliminates the parallel-drain `[Unreleased]` conflict).
+**CLAUDE.md**: No new rules — this drain reinforced existing canon (#180 parallel-worktree, #1646 parallel-path, #1174 3-clean-runs, #1079 scope discipline, Bug-report-triage symptom-up, #1804 review discipline) rather than adding any.
+
+### Open Items
+
+- [ ] Flaky `test_ws_auth_close_socket` under `-n auto` — Action Tracker #315 (GitHub #1875)
+- [ ] Promote browser-smoke to a hard gate once runner-green — Action Tracker #314 (GitHub #1869), carried from v1.0.8-1
 
 ## v1.0.8-1 — Security-drift prevention program (PRs #1859, #1860, #1861, #1863, #1864, #1866, #1867)
 
@@ -423,7 +470,7 @@ S011 (#1864) reached 0 false-positives only because the dogfood pass (#1060) aga
 - [ ] `_get_project_app_dirs()` blind from inside the repo tree — Action Tracker #312 (GitHub #1865)
 - [ ] Allowlist can re-expose the serialization floor — Action Tracker #313 (GitHub #1868)
 - [ ] Promote browser-smoke to a hard gate once runner-green; flip #1848 xfail when the framework fix lands — Action Tracker #314 (GitHub #1869)
-- [ ] Framework fix for #1848 (re-execute classic `<script>` on the mount morph) — Action Tracker #310 (GitHub #1848), carried from v1.0.7-3+4
+- [x] Framework fix for #1848 (re-execute classic `<script>` on the mount morph) — Action Tracker #310 (GitHub #1848) — resolved in v1.0.8-2 (PR #1871)
 
 ## v1.0.7-3 + v1.0.7-4 — Security audit drain + coordinated disclosure (private PRs #165–#177 → djust 1.0.7 + 13 GHSAs)
 
@@ -469,7 +516,7 @@ S011 (#1864) reached 0 false-positives only because the dogfood pass (#1060) aga
 
 ### Open Items
 - [x] Browser-smoke coverage for downstream interactive paths — Action Tracker #309 (GitHub #1849) — resolved in v1.0.8-1 (PR #1866; harness shipped non-gating per #1534, promotion tracked in #1869)
-- [ ] #1848 framework fix (re-execute classic scripts on the mount morph, or system-check warning) — Action Tracker #310 (GitHub #1848)
+- [x] #1848 framework fix (re-execute classic scripts on the mount morph, or system-check warning) — Action Tracker #310 (GitHub #1848) — resolved in v1.0.8-2 (PR #1871)
 
 ## v1.0.7-1 — Post-1.0.6 open-issue drain (PRs #1838, #1839)
 
