@@ -355,6 +355,109 @@ issue or be explicitly closed with a reason.
 | 313 | Per-model `djust_serializable_fields` allowlist can re-expose the sensitive-field floor (`password`/`is_superuser`/`is_staff`) — allowlist wins over `_ALWAYS_EXCLUDED_FIELDS` | PR #1867 / v1.0.8-1 retro | #1868 | Open | Surfaced by writing SECURE_DEFAULTS.md (`serialization.py:362`). Doc now states accurate precedence + WARNING; code-hardening question (make floor unconditional?) tracked here. |
 | 314 | Promote the Playwright browser-smoke to a hard merge gate once runner-green (#1534) — flip `continue-on-error` + add to the `test-summary` AND-condition (#1713); flip the #1848 xfail to a hard assertion when the framework fix lands | PR #1866 / v1.0.8-1 retro | #1869 | Closed | **Resolved (PR for #1869):** `playwright-tests` was `success` on the last 3 runner runs (precondition met per #1534), so `test_browser_smoke.py` was carved into its own BLOCKING `browser-smoke` CI job (no `continue-on-error`, mirrors the `demo-checks` pattern #1708/#1713) and wired into the `test-summary` AND-condition; the rest of the playwright suite stays non-blocking (the full suite can be flaky). #1848 was code-fixed by PR #1871 (re-execute classic `<script>` on the #1610 mount morph), so the inline-script known-xfail was flipped to a HARD regression assertion. |
 | 315 | `test_mount_batch_with_login_view_does_not_close_shared_socket` is order-fragile under `-n auto` (passes in isolation + 2/3 full runs) | PR #1874 / v1.0.8-2 retro | #1875 | Closed | **Resolved in v1.1.0-1 (PR #1881):** channel-layer isolation (`backends.clear()`) + deterministic ping/pong openness probe (replaced the wall-clock `receive_nothing`); the systemic test-isolation fixture (#1884) retired the shared-process-global flaky class. |
+| 316 | Propagate the "cap concurrent worktree implementer agents at ~3" rule into the pipeline-run / pipeline-drain skill prompts | v1.1.0-4 retro | — | OUT-OF-REPO | Skill prompts live in `~/.claude/skills/{pipeline-run,pipeline-drain}/SKILL.md` (gitignored, not in this repo). In-repo half DONE: CLAUDE.md "Process canonicalizations from v1.1.0-4 retro arc" rule 2. Trigger: 5 concurrent worktree fixers tripped a transient server-side throttle; ≤3 concurrent prevents it, serial resumption recovers cleanly. |
+
+## v1.1.0-4 — post-convergence open-issue drain (PRs #1961–#1965)
+
+**Date**: 2026-06-25
+**Scope**: Drained the 5 open follow-up issues surfaced by the ADR-022 ViewRuntime convergence + ADR-023 type-enforcement arcs — 4 real bugs (#1947 `LiveComponent.update`, #1952 `TutorialMixin` setter-init, #1940 `_run_async_work` race, #1943 browser-smoke flake) + 1 external-cause investigation (#1938 `core.bare` leak). The 2 priority:low bug-capture feature tracks (#1561/#1562) were deliberately excluded as deferred feature work.
+**Tests at close**: 8608 (mypy: 823 source files strict, 0 lenient exceptions — the ADR-023 gate held through every fix)
+
+### What We Learned
+
+**1. Test the bare base class; init attrs in `__init__`, not a setter — the type-ratchet dividend.**
+#1947 (`LiveComponent` *documented* `update()` but never implemented it) and #1952 (`TutorialMixin` initialized four `_tutorial_*` signal attrs only in the `tutorial_total_steps` setter) were both AttributeError-on-real-paths crashes that shipped green for releases — the 8600-test suite never caught them because every test exercised a subclass that overrode `update()` / set the property first. Both were surfaced by the ADR-023 strict-typing ratchet (mypy `[attr-defined]`), the same way the ratchet found ~8 bugs across M1–M4g.
+
+**Action taken**: Added CLAUDE.md canon "Process canonicalizations from v1.1.0-4 retro arc" rule 1 — test the BARE base class when it declares/documents a method, and init instance attrs in `__init__` not a property setter (generalizes #1104 to the base-vs-subclass axis). Bugs fixed in #1964 / #1962.
+
+**2. For an external/unpinnable root cause, ship a detector — not a phantom fix (#1938).**
+The `core.bare` worktree-config leak was assumed to be a djust pre-push/test bug. A by-inspection + targeted-single-test investigation (never running the full suite — that *is* the trigger) proved no djust code writes `core.bare`; the shared config's `gk-last-accessed`/`vscode-merge-base` keys point at an external IDE/GitKraken git integration (the #1804/#300 class).
+
+**Action taken**: Closed — PR #1965 (`scripts/check-shared-git-config.sh` detect/`--fix` recover + CONTRIBUTING docs + 5 guard tests; root cause external/unpinnable in-repo).
+
+**3. Cap concurrent worktree implementer agents at ~3.**
+Launching all 5 drain fixers as concurrent worktree-isolated agents tripped a transient server-side API throttle ("temporarily limiting requests — not your usage limit") that stalled 3 mid-task. Recovery was clean — worktrees persist across a rate-limit rest, so each agent resumed mid-task via a follow-up message with no work lost — but the prevention is a concurrency cap.
+
+**Action taken**: Added CLAUDE.md canon "Process canonicalizations from v1.1.0-4 retro arc" rule 2 (cap at ~3; serial resumption is safe). Skill-prompt propagation tracked in Action Tracker #316 (OUT-OF-REPO — the pipeline skills are gitignored).
+
+### Insights
+
+- **Every drain issue was a convergence/ratchet dividend.** All 5 were follow-ups the two big v1.1 arcs *surfaced but deferred* — 2 latent crash bugs the type-checker found, 1 race the convergence review found (#1940), 1 CI flake, 1 external-tooling diagnosis. Big refactors pay down latent bugs; budget a drain after each.
+- **#1961's real fix was subtler than "bump the timeout":** the readiness poll hit `/` (a different LiveView), so it never warmed the canary route's lazy compile. Poll the REAL target, not a proxy (reproduction-fidelity, #1650/#1638 family).
+- **#1940 cure = identity-guard, not cancel:** `sync_to_async` thread-pool work can't be `.cancel()`-ed, so the post-await `is`-check is the only correct fix — a detached-task instance of the #245/#1198 TOCTOU class.
+- **Serial-resumption recovery worked perfectly** under the throttle — no work lost across 3 stalled agents. The worktree-isolation pattern is robust to interruption.
+
+### Review Stats
+
+| Metric | #1961 | #1962 | #1963 | #1964 | #1965 | Total |
+|--------|-------|-------|-------|-------|-------|-------|
+| Tests added | CI | 5 | 4 | 3 | 5 | 17+ |
+| 🔴 Findings | 0 | 0 | 0 | 0 | 0 | 0 |
+| 🟡 Findings | 0 | 0 | 0 | 0 | 0 | 0 |
+| Gate-off verified | CI | ✓ | ✓ | ✓ | ✓ | 4 |
+| CI failures | 0 | 0 | 0 | 0 | 0 | 0 |
+
+### Process Improvements Applied
+
+**CLAUDE.md**: Added "Process canonicalizations from v1.1.0-4 retro arc" — 2 rules (bare-base-class testing + init-in-`__init__`; worktree-agent concurrency cap).
+**Pipeline template**: none.
+**Checklist**: none.
+**Skills**: concurrency-cap propagation to pipeline-run/pipeline-drain prompts tracked OUT-OF-REPO (Action Tracker #316).
+
+### Open Items
+
+- [ ] #316 — propagate the worktree-agent concurrency cap into the pipeline-run/pipeline-drain skill prompts (OUT-OF-REPO; in-repo CLAUDE.md half done)
+- [ ] #1561 / #1562 — priority:low bug-capture features, deferred (not in this bucket)
+
+## v1.1 type-enforcement arc (ADR-023) + rc1/rc2 prep (PRs #1926–#1960)
+
+**Date**: 2026-06-24 → 2026-06-25
+**Scope**: The headline is the **ADR-023 incremental type-enforcement ratchet** (#1936–#1960, ~21 PRs): turn a *dead* mypy config (`disallow_untyped_defs` was set but never invoked — ~8,484 parked errors — while `py.typed` shipped, making djust's untyped internals a type contract consumers inherit) into an enforced gate via a lenient-global + per-module strict-island model. M1 (foundation + security + `_rust.pyi` wire boundary) → M2 (public-API quartet) → M3 (dispatch/runtime core) → M4a–M4g (the long tail, including the `components/rust_handlers` Rust-FFI boundary) → #1960 (env-independent gate fix). End state: **546 strict module entries / 823 source files, zero lenient exceptions**, enforced blocking in CI + pre-commit. Preceded by the rc1/rc2 release-prep + de-flake batch (#1926 browser-smoke promoted to a hard merge gate #1869; #1929/#1932/#1933 de-flakes; #1935 `live_redirect`-to-non-LiveView full-page fallback #1934). This entry closes the retro gap between the v1.1.0-3 convergence retro and the v1.1.0-4 drain retro. This arc was `/goal`-driven, not a numbered ROADMAP milestone, which is why it lacked an entry until now.
+**Tests at close**: 8604 → 8608 across the arc; mypy 823 source files strict, 0 lenient exceptions.
+
+### What We Learned
+
+**1. The ratchet dividend: enforcing dead config found ~8 latent bugs and closed a real consumer liability.**
+The config existed but was never run, *and* `py.typed` was shipped — so consumers were handed djust's unchecked internals as a typing contract. Enforcing it (not the annotations themselves) is what paid off: the ratchet surfaced ~8 real bugs the green suite never caught — `event_handler`'s untyped dual-call API (→ `@overload`, the consumer-facing case ADR-023 was named for), `delete_offline` calling with a missing required arg (TypeError on every call — an untested path), `request._streaming_iter` typed `str` but yielding `bytes`, `AccordionState.active` str→Union, a `frozenset`-denylist mutability lie, `modal_simple` reading an unset attr — plus the three latent crashes (#1947/#1952/#1940) that the v1.1.0-4 drain then fixed.
+
+**Action taken**: Closed — ADR-023 shipped (`docs/adr/023-incremental-type-enforcement.md`, marked complete in #1960); 546 strict modules / 0 lenient exceptions; all surfaced bugs fixed across the arc + v1.1.0-4. The generalizable "type-ratchet dividend" is canonized in CLAUDE.md "Process canonicalizations from v1.1.0-4 retro arc" rule 1.
+
+**2. A green CI lint/type gate can be RED in a full dev environment.**
+After the ratchet, `mypy python/djust` passed CI but failed a full local dev env. Root cause: `import-untyped` (third-party lib *installed without stubs*, e.g. requests/yaml in a full dev env) is a different error code than `import-not-found` (lib *absent*, which CI's minimal env hit and `ignore_missing_imports` suppressed) — and it's reported against the *importing* strict-island module, so a per-lib override can't reach it. A contributor's local `mypy`/pre-commit would have hit 3 errors a green CI hid.
+
+**Action taken**: Added CLAUDE.md canon "Process canonicalizations from the v1.1 type-enforcement arc (ADR-023)" — verify a newly-enforced lint/type gate in a FULL dev env (all deps installed), not just CI's minimal env; CI-green ≠ contributor-green. Fixed in #1960 (`disable_error_code = ["import-untyped"]` in global `[tool.mypy]`).
+
+**3. An "intractable" boundary can flip clean once the right pattern is proven — don't accept an early verdict.**
+M4b-1 deemed `components/rust_handlers` (193 component-tag render handlers) a ~344-error intractable iceberg and documented it as *the* lenient exception. M4g re-attempted with the now-proven `_safe()` cast wrapper (`SafeString` resolves to `Any` under unstubbed django, so a `cast(str, mark_safe(...))` *wrapper* — not the return annotation — absorbs the ~200-strong `no-any-return` cascade) + inline `cast()` for the `kw.get()→object` cascade → flipped clean, **0 new `# type: ignore`**, render byte-identity verified (382 outputs across all 193 handlers). The "intractable" verdict predated the right tooling.
+
+**Action taken**: Closed — PR #1959 (rust_handlers strict; ADR-023 ratchet 100% complete, no exceptions).
+
+### Insights
+
+- **Parallel-worktree batches scaled the ratchet** — ~5 concurrent worktree implementers per wave, the only merge conflict being the *additive* pyproject override blocks (resolved by reconstruct-both-blocks). The 5-concurrent throttle that bit the v1.1.0-4 drain is the one cost; cap at ~3 (v1.1.0-4 canon).
+- **Render byte-identity (382 outputs) was the load-bearing check** for the rust_handlers render module — a strict-typing flip of rendering code needs an output-equality harness, not just gate-off.
+- **Every rc-prep de-flake followed the same canon** (#1795): #1932 owned the clock in rate-limit tests, #1933 awaited async-work completion deterministically — never assert on wall-clock; assert an ordering/completion invariant.
+- **Goal-driven arcs need a retro too.** This 25-PR body of work slipped the milestone-retro net purely because it was `/goal`-driven rather than ROADMAP-numbered. The per-PR retros all existed, so the gap was invisible until asked about — worth a check at each release that every shipped PR maps to a milestone-retro entry.
+
+### Review Stats
+
+| Metric | type-arc (#1936–#1960) | rc-prep (#1926–#1935) | Total |
+|--------|------------------------|------------------------|-------|
+| PRs | 21 | 5 (incl. 1 hard-gate promotion) | 26 |
+| Latent bugs surfaced+fixed | ~8 + 3 (drained in v1.1.0-4) | — | ~11 |
+| 🔴 / 🟡 Findings | 0 / 0 | 0 / 0 | 0 |
+| Gate-off / empirical-canary verified | every strict batch | n/a | ✓ |
+| Strict module entries at close | 546 (0 lenient) | — | 546 |
+
+### Process Improvements Applied
+
+**CLAUDE.md**: Added "Process canonicalizations from the v1.1 type-enforcement arc (ADR-023)" — the CI-green ≠ dev-green gate rule.
+**ADR**: ADR-023 authored + marked complete (#1936 → #1960).
+**Pipeline template / Checklist / Skills**: none.
+
+### Open Items
+
+- None. The ratchet is complete (546 strict / 0 lenient); all surfaced bugs fixed or drained in v1.1.0-4. ADR-023 closed.
 
 ## v1.1.0-3 — ViewRuntime dispatch convergence (ADR-022 headline) (PRs #1886/#1888/#1890/#1893/#1895/#1897/#1909/#1912/#1914/#1916/#1918/#1920 + followups #1910/#1923/#1924 + resync #1925)
 

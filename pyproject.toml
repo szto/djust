@@ -176,10 +176,1016 @@ line-length = 100
 target-version = "py310"
 
 [tool.mypy]
+# --------------------------------------------------------------------------- #
+# Incremental type enforcement — see docs/adr/023-incremental-type-enforcement.md
+#
+# The global default is intentionally LENIENT so the gate is GREEN today
+# (`mypy python/djust` exits 0) against the ~8.4k-error legacy baseline. Strict
+# enforcement is applied per-module via the `[[tool.mypy.overrides]]` "strict
+# islands" below — a small set of modules that pass clean under strict rules.
+# The ratchet: flip one module at a time from lenient to a strict island, fixing
+# its annotations/real errors in that PR. Prioritise the developer-facing public
+# API (live_view / component / decorators / forms) since py.typed exposes our
+# types to consumers, with `_rust.pyi` typing the PyO3 boundary.
+# --------------------------------------------------------------------------- #
 python_version = "3.10"
-warn_return_any = true
 warn_unused_configs = true
+# `import-untyped` is raised in the IMPORTING (strict-island) module for a 3rd-party
+# lib that is INSTALLED but ships no stubs (yaml/requests in a full dev env). It is a
+# different code than the `import-not-found` that `ignore_missing_imports` covers, and
+# it is reported against the importer (not the lib), so a per-module override on the
+# lib cannot reach it. Disable globally so `mypy python/djust` is clean in every env.
+disable_error_code = ["import-untyped"]
+
+# Kill third-party + Django + PyYAML "missing library stubs" noise (and any
+# stale _rust import noise). The `_rust.pyi` stub still types the PyO3 surface
+# for the strict islands below.
+ignore_missing_imports = true
+
+# Lenient global default (legacy modules not yet on a strict island). The legacy
+# baseline carries ~8.4k errors (≈6.8k missing annotations + ~700 real type
+# errors); enforcing strict globally would make the gate permanently red, so the
+# global default parks legacy errors via `ignore_errors`. This is the canonical
+# mypy incremental-adoption pattern (NOT a blanket free pass — the strict islands
+# below flip `ignore_errors` back OFF and genuinely enforce every error class).
+# The ratchet flips one module at a time out of this lenient default into a
+# strict island, triaging its real errors in that PR.
+disallow_untyped_defs = false
+disallow_incomplete_defs = false
+warn_return_any = false
+ignore_errors = true
+
+# Third-party libraries consumed BY a strict island but lacking type stubs.
+# `ignore_missing_imports` in the global section is honored by lenient modules,
+# but a strict island (ignore_errors=false) still surfaces `import-untyped` for
+# an installed-but-unstubbed dependency (e.g. PyYAML, consumed by
+# djust.permissions; `requests`, consumed by djust.deploy_cli +
+# djust.observability.dry_run). Mark those libraries untyped explicitly so the
+# strict islands stay green without weakening the island's own def/return
+# strictness.
+[[tool.mypy.overrides]]
+module = ["yaml", "requests"]
+ignore_missing_imports = true
+
+# --------------------------------------------------------------------------- #
+# STRICT ISLANDS — modules enforced under full strict rules. Each is verified to
+# pass clean (0 errors) under disallow_untyped_defs + disallow_incomplete_defs +
+# warn_return_any. Adding a module here is the "ratchet" — do it one module per
+# PR. Do NOT add a module that doesn't pass clean; fix its annotations first.
+# --------------------------------------------------------------------------- #
+
+# Security boundary (highest-value island: the trust surface).
+[[tool.mypy.overrides]]
+module = [
+    "djust.security.*",
+    "djust._rust",
+]
+ignore_errors = false
 disallow_untyped_defs = true
+disallow_incomplete_defs = true
+warn_return_any = true
+
+# Rate limiting + connection guard (DoS surface).
+[[tool.mypy.overrides]]
+module = ["djust.rate_limit"]
+ignore_errors = false
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+warn_return_any = true
+
+# Input validation + permissions audit (security-adjacent).
+[[tool.mypy.overrides]]
+module = [
+    "djust.validation",
+    "djust.permissions",
+]
+ignore_errors = false
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+warn_return_any = true
+
+# Well-annotated utility / leaf modules (low-churn, easy to keep green).
+[[tool.mypy.overrides]]
+module = [
+    "djust.markdown",
+    "djust.schema",
+    "djust.signals",
+    "djust.async_result",
+    "djust.test_isolation",
+    "djust._client_ip",
+    "djust._log_utils",
+    "djust._html",
+    "djust._view_resolution",
+    "djust._deprecation",
+    "djust._context_provider",
+]
+ignore_errors = false
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+warn_return_any = true
+
+# Public-API quartet (ADR-023 M2) — the developer-facing surface that py.typed
+# exposes to downstream consumers. Strict-typing these protects every consumer's
+# type-check against signature drift in our public API.
+[[tool.mypy.overrides]]
+module = [
+    "djust.live_view",
+    "djust.components.base",
+    "djust.decorators",
+    "djust.forms",
+]
+ignore_errors = false
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+warn_return_any = true
+
+# Dispatch/runtime core (ADR-023 M3) — the WebSocket/SSE/runtime spine that
+# every event + mount flows through. Strict-typing these protects the transport
+# dispatch contract (ViewRuntime convergence, ADR-022) against signature drift.
+[[tool.mypy.overrides]]
+module = [
+    "djust.runtime",
+    "djust.websocket",
+    "djust.websocket_utils",
+    "djust.sse",
+    "djust.streaming",
+]
+ignore_errors = false
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+warn_return_any = true
+
+# Loose top-level modules (ADR-023 M4a) — independent, low-cross-risk modules
+# flipped from the lenient default to strict islands. Spans the wire-boundary
+# serializer, config/routing/formsets/init plumbing, the public test client,
+# the JS-command builder, the simple/react/rust component shims, the CSS
+# framework adapters, the wizard/presence mixins, and the perf/profiler tooling.
+[[tool.mypy.overrides]]
+module = [
+    "djust.serialization",
+    "djust.config",
+    "djust.__init__",
+    "djust.routing",
+    "djust.formsets",
+    "djust.simple_live_view",
+    "djust.testing",
+    "djust.react",
+    "djust.rust_components",
+    "djust.frameworks",
+    "djust.js",
+    "djust.wizard",
+    "djust.performance",
+    "djust.profiler",
+    "djust.presence",
+]
+ignore_errors = false
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+warn_return_any = true
+
+# components/ machinery (ADR-023 M4b, part 1) — the core component-system
+# plumbing (NOT the UI catalog, which is a later batch). Spans the registry,
+# assigns/dependencies/preset/icon registries, the @component function-component
+# decorator + {% call %} dispatch, the suspense + server-event-toast mixins, the
+# shared cell/color formatting utils, the AppConfig, the package __init__, the
+# per-component interactive mixin base (TypedState), and the dev-tools template
+# tags + their shared registry/safe-URL helper. The large Rust-bridge handler
+# registry (rust_handlers), the per-widget data_table mixin, and the big
+# templatetag modules (djust_components/_advanced/_forms/_charts) remain lenient
+# for a continuation batch.
+[[tool.mypy.overrides]]
+module = [
+    "djust.components.__init__",
+    "djust.components.apps",
+    "djust.components.registry",
+    "djust.components.assigns",
+    "djust.components.dependencies",
+    "djust.components.function_component",
+    "djust.components.helpers",
+    "djust.components.presets",
+    "djust.components.icons",
+    "djust.components.suspense",
+    "djust.components.server_event_toast",
+    "djust.components.utils",
+    "djust.components.mixins.base",
+    "djust.components.templatetags._registry",
+    "djust.components.templatetags._dev_tools",
+]
+ignore_errors = false
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+warn_return_any = true
+
+# components/ UI catalog + templatetag helpers (ADR-023 M4b, part 2) — the
+# component UI catalog and small templatetag helper modules. Spans the full
+# components/components/ widget catalog, the ui/ stateless widgets, the data/
+# forms/ layout/ gallery/ management/ ttyd/ leaf modules, the descriptor-based
+# components (descriptors/*), and the deprecated state mixins (mixins/tooltip,
+# tabs, sheet, modal, dropdown, collapsible, carousel, accordion). The large
+# Rust-bridge handler registry (rust_handlers), the per-widget data_table mixin,
+# the big templatetag modules (djust_components/_advanced/_forms/_charts), the
+# gallery LiveViews, and the union-typed `*_simple` UI widgets remain lenient
+# for a continuation batch.
+[[tool.mypy.overrides]]
+module = [
+    "djust.components.components.__init__",
+    "djust.components.components.accordion",
+    "djust.components.components.activity_feed",
+    "djust.components.components.agent_step",
+    "djust.components.components.alert",
+    "djust.components.components.announcement_bar",
+    "djust.components.components.app_shell",
+    "djust.components.components.approval_gate",
+    "djust.components.components.aspect_ratio",
+    "djust.components.components.audit_log",
+    "djust.components.components.avatar",
+    "djust.components.components.avatar_group",
+    "djust.components.components.badge",
+    "djust.components.components.bar_chart",
+    "djust.components.components.bottom_sheet",
+    "djust.components.components.breadcrumb",
+    "djust.components.components.calendar_heatmap",
+    "djust.components.components.callout",
+    "djust.components.components.card",
+    "djust.components.components.carousel",
+    "djust.components.components.chat_bubble",
+    "djust.components.components.code_block",
+    "djust.components.components.code_snippet",
+    "djust.components.components.collab_selection",
+    "djust.components.components.collapsible",
+    "djust.components.components.color_picker",
+    "djust.components.components.combobox",
+    "djust.components.components.command_palette",
+    "djust.components.components.connection_status",
+    "djust.components.components.content_loader",
+    "djust.components.components.context_menu",
+    "djust.components.components.conversation_thread",
+    "djust.components.components.cookie_consent",
+    "djust.components.components.copy_button",
+    "djust.components.components.copyable_text",
+    "djust.components.components.countdown",
+    "djust.components.components.cron_input",
+    "djust.components.components.cursors_overlay",
+    "djust.components.components.dashboard_grid",
+    "djust.components.components.data_card_grid",
+    "djust.components.components.data_grid",
+    "djust.components.components.data_table",
+    "djust.components.components.date_picker",
+    "djust.components.components.description_list",
+    "djust.components.components.dropdown",
+    "djust.components.components.dropdown_menu",
+    "djust.components.components.empty_state",
+    "djust.components.components.error_boundary",
+    "djust.components.components.error_page",
+    "djust.components.components.expandable_text",
+    "djust.components.components.export_dialog",
+    "djust.components.components.fab",
+    "djust.components.components.feedback_widget",
+    "djust.components.components.fieldset",
+    "djust.components.components.file_dropzone",
+    "djust.components.components.file_tree",
+    "djust.components.components.filter_bar",
+    "djust.components.components.form_array",
+    "djust.components.components.form_group",
+    "djust.components.components.gantt_chart",
+    "djust.components.components.gauge",
+    "djust.components.components.hover_card",
+    "djust.components.components.icon",
+    "djust.components.components.image_cropper",
+    "djust.components.components.image_lightbox",
+    "djust.components.components.image_upload_preview",
+    "djust.components.components.import_wizard",
+    "djust.components.components.infinite_scroll",
+    "djust.components.components.inline_edit",
+    "djust.components.components.input_group",
+    "djust.components.components.kanban_board",
+    "djust.components.components.kbd",
+    "djust.components.components.line_chart",
+    "djust.components.components.live_counter",
+    "djust.components.components.live_indicator",
+    "djust.components.components.loading_overlay",
+    "djust.components.components.log_viewer",
+    "djust.components.components.map_picker",
+    "djust.components.components.markdown_editor",
+    "djust.components.components.markdown_textarea",
+    "djust.components.components.mentions_input",
+    "djust.components.components.meter",
+    "djust.components.components.modal",
+    "djust.components.components.multi_select",
+    "djust.components.components.multimodal_input",
+    "djust.components.components.nav_menu",
+    "djust.components.components.notification_badge",
+    "djust.components.components.notification_center",
+    "djust.components.components.notification_popover",
+    "djust.components.components.number_stepper",
+    "djust.components.components.otp_input",
+    "djust.components.components.page_alert",
+    "djust.components.components.page_header",
+    "djust.components.components.pagination",
+    "djust.components.components.pie_chart",
+    "djust.components.components.popover",
+    "djust.components.components.presence_avatars",
+    "djust.components.components.progress",
+    "djust.components.components.progress_circle",
+    "djust.components.components.rating",
+    "djust.components.components.reactions",
+    "djust.components.components.relative_time",
+    "djust.components.components.resizable_panel",
+    "djust.components.components.responsive_image",
+    "djust.components.components.ribbon",
+    "djust.components.components.rich_text_editor",
+    "djust.components.components.scroll_area",
+    "djust.components.components.scroll_spy",
+    "djust.components.components.scroll_to_top",
+    "djust.components.components.segmented_progress",
+    "djust.components.components.sheet",
+    "djust.components.components.sidebar",
+    "djust.components.components.signature_pad",
+    "djust.components.components.skeleton",
+    "djust.components.components.skeleton_factory",
+    "djust.components.components.sortable_grid",
+    "djust.components.components.sortable_list",
+    "djust.components.components.source_citation",
+    "djust.components.components.sparkline",
+    "djust.components.components.spinner",
+    "djust.components.components.split_button",
+    "djust.components.components.split_pane",
+    "djust.components.components.stat_card",
+    "djust.components.components.status_indicator",
+    "djust.components.components.stepper",
+    "djust.components.components.sticky_header",
+    "djust.components.components.streaming_text",
+    "djust.components.components.switch",
+    "djust.components.components.table_of_contents",
+    "djust.components.components.tabs",
+    "djust.components.components.tag",
+    "djust.components.components.tag_input",
+    "djust.components.components.terminal",
+    "djust.components.components.theme_toggle",
+    "djust.components.components.thinking_indicator",
+    "djust.components.components.timeline",
+    "djust.components.components.toast",
+    "djust.components.components.toggle_group",
+    "djust.components.components.token_counter",
+    "djust.components.components.toolbar",
+    "djust.components.components.tooltip",
+    "djust.components.components.tour",
+    "djust.components.components.truncated_list",
+    "djust.components.components.virtual_list",
+    "djust.components.components.voice_input",
+    "djust.components.components.wizard",
+    "djust.components.data.__init__",
+    "djust.components.data.table",
+    "djust.components.descriptors.__init__",
+    "djust.components.descriptors.accordion",
+    "djust.components.descriptors.base",
+    "djust.components.descriptors.carousel",
+    "djust.components.descriptors.collapsible",
+    "djust.components.descriptors.dropdown",
+    "djust.components.descriptors.modal",
+    "djust.components.descriptors.sheet",
+    "djust.components.descriptors.tabs",
+    "djust.components.descriptors.tooltip",
+    "djust.components.forms.__init__",
+    "djust.components.forms.foreign_key",
+    "djust.components.gallery.__init__",
+    "djust.components.gallery.urls",
+    "djust.components.layout.__init__",
+    "djust.components.layout.navbar",
+    "djust.components.management.__init__",
+    "djust.components.management.commands.__init__",
+    "djust.components.mixins.__init__",
+    "djust.components.mixins.accordion",
+    "djust.components.mixins.carousel",
+    "djust.components.mixins.collapsible",
+    "djust.components.mixins.dropdown",
+    "djust.components.mixins.modal",
+    "djust.components.mixins.sheet",
+    "djust.components.mixins.tabs",
+    "djust.components.mixins.tooltip",
+    "djust.components.templatetags.__init__",
+    "djust.components.ttyd.__init__",
+    "djust.components.ui.__init__",
+    "djust.components.ui.alert",
+    "djust.components.ui.badge",
+    "djust.components.ui.button",
+    "djust.components.ui.card",
+    "djust.components.ui.modal",
+    "djust.components.ui.progress",
+    "djust.components.ui.spinner",
+]
+ignore_errors = false
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+warn_return_any = true
+
+# components/ FINAL batch (ADR-023 M4b, part 3) — the LAST remaining
+# components/ modules: the component template-tag layer
+# (djust_components/_advanced/_forms/_charts), the per-widget data_table mixin,
+# the gallery LiveView/view/registry/examples surface + its management command,
+# the ~24 remaining components/components/ widgets, the layout/data/ttyd leaves,
+# and the union-typed `ui/*_simple` + ui/dropdown stateless widgets.
+# (The large Rust-bridge handler registry `djust.components.rust_handlers` was
+# the last lenient holdout; it was flipped to a strict island in M4g — see the
+# dedicated block below.)
+[[tool.mypy.overrides]]
+module = [
+    "djust.components.components.animated_number",
+    "djust.components.components.breadcrumb_dropdown",
+    "djust.components.components.button",
+    "djust.components.components.calendar_view",
+    "djust.components.components.comparison_table",
+    "djust.components.components.currency_input",
+    "djust.components.components.dependent_select",
+    "djust.components.components.diff_viewer",
+    "djust.components.components.form_validation",
+    "djust.components.components.heatmap",
+    "djust.components.components.json_viewer",
+    "djust.components.components.markdown",
+    "djust.components.components.masonry_grid",
+    "djust.components.components.model_selector",
+    "djust.components.components.org_chart",
+    "djust.components.components.pivot_table",
+    "djust.components.components.prompt_editor",
+    "djust.components.components.qr_code",
+    "djust.components.components.rich_select",
+    "djust.components.components.server_event_toast",
+    "djust.components.components.status_dot",
+    "djust.components.components.time_picker",
+    "djust.components.components.tree_view",
+    "djust.components.components.treemap",
+    "djust.components.data.pagination",
+    "djust.components.gallery.context_processors",
+    "djust.components.gallery.examples",
+    "djust.components.gallery.live_views",
+    "djust.components.gallery.registry",
+    "djust.components.gallery.views",
+    "djust.components.layout.tabs",
+    "djust.components.management.commands.component_gallery",
+    "djust.components.mixins.data_table",
+    "djust.components.templatetags._advanced",
+    "djust.components.templatetags._charts",
+    "djust.components.templatetags._forms",
+    "djust.components.templatetags.djust_components",
+    "djust.components.ttyd.terminal",
+    "djust.components.ui.accordion_simple",
+    "djust.components.ui.alert_simple",
+    "djust.components.ui.avatar_simple",
+    "djust.components.ui.badge_simple",
+    "djust.components.ui.breadcrumb_simple",
+    "djust.components.ui.button_group_simple",
+    "djust.components.ui.button_simple",
+    "djust.components.ui.card_simple",
+    "djust.components.ui.checkbox_simple",
+    "djust.components.ui.divider_simple",
+    "djust.components.ui.dropdown",
+    "djust.components.ui.dropdown_simple",
+    "djust.components.ui.icon_simple",
+    "djust.components.ui.input_simple",
+    "djust.components.ui.list_group_simple",
+    "djust.components.ui.modal_simple",
+    "djust.components.ui.navbar_simple",
+    "djust.components.ui.offcanvas_simple",
+    "djust.components.ui.pagination_simple",
+    "djust.components.ui.progress_simple",
+    "djust.components.ui.radio_simple",
+    "djust.components.ui.range_simple",
+    "djust.components.ui.select_simple",
+    "djust.components.ui.spinner_simple",
+    "djust.components.ui.switch_simple",
+    "djust.components.ui.table_simple",
+    "djust.components.ui.tabs_simple",
+    "djust.components.ui.textarea_simple",
+    "djust.components.ui.toast_simple",
+    "djust.components.ui.tooltip_simple",
+]
+ignore_errors = false
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+warn_return_any = true
+
+# components/rust_handlers (ADR-023 M4g, ratchet COMPLETE) — the Rust template-
+# engine component tag-registration shim: ~193 `render()` handlers (inline +
+# block) that parse untyped Rust-engine arg lists (`["key=val", ...]`) into
+# object-valued dicts and emit component HTML. This was the SOLE remaining
+# lenient module (the genuinely-dynamic Rust-FFI boundary). It is now strict:
+# - All 193 handler returns are pinned via a typed `_safe()` wrapper that casts
+#   Django's `@keep_lazy`-decorated (untyped -> Any) `mark_safe` to `str`,
+#   absorbing the no-any-return cascade WITHOUT any `# type: ignore`.
+# - The `kw.get(...) -> object` cascades are narrowed with inline `cast(...)` /
+#   `str(...)` (runtime no-ops) at each `int()`/`float()`/dict-key/attr site.
+# Zero new `# type: ignore` were needed (the only one is the pre-existing
+# `_rust` `[import]`). Render output is proven byte-identical (382 outputs across
+# all 193 handlers). Flipping this module retires the last ADR-023 lenient
+# exception — the global lenient default now parks only legacy non-components
+# modules.
+[[tool.mypy.overrides]]
+module = [
+    "djust.components.rust_handlers",
+]
+ignore_errors = false
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+warn_return_any = true
+
+# admin_ext/ subpackage (ADR-023 M4c, part 2) — the Django-admin integration:
+# the DjustAdminSite + DjustModelAdmin config, the plugin system (AdminPlugin /
+# AdminPage / AdminWidget / NavItem), the LiveView-based admin views (list /
+# detail / create / delete / login / logout), the AdminFormMixin (FK/M2M/date
+# field handling), the bulk-action progress widget + decorator, the admin
+# CSS-framework adapter, the register/action/display decorators, the AppConfig,
+# the autodiscover __init__, and the admin template-tag helpers. Excludes
+# admin_ext/tests/, which stays on the lenient global default. Real type bugs
+# fixed to clean this island: implicit-Optional defaults in LoginView field
+# handlers, an LSP-incompatible ModelCreateView.mount override, and several
+# Any-leak returns narrowed at the Django-untyped boundary (str()/bool()).
+[[tool.mypy.overrides]]
+module = [
+    "djust.admin_ext.__init__",
+    "djust.admin_ext.adapters",
+    "djust.admin_ext.apps",
+    "djust.admin_ext.components.__init__",
+    "djust.admin_ext.decorators",
+    "djust.admin_ext.forms",
+    "djust.admin_ext.options",
+    "djust.admin_ext.plugins",
+    "djust.admin_ext.progress",
+    "djust.admin_ext.sites",
+    "djust.admin_ext.templatetags.__init__",
+    "djust.admin_ext.templatetags.djust_admin_tags",
+    "djust.admin_ext.views",
+]
+ignore_errors = false
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+warn_return_any = true
+
+# mixins/ subpackage (ADR-023 M4c, part 1) — the LiveView mixin layer that
+# composes the public LiveView class. Spans the small leaf mixins (flash,
+# layout, page_metadata, post_processing, async_work, waiters, model_binding,
+# components), the context/JIT serialization mixins (context, jit), the HTTP
+# request handling mixin (request), the Rust-bridge / change-detection mixin
+# (rust_bridge — annotations only; the _sync_state_to_rust change-detection +
+# _framework_attrs filter logic is byte-identical, no comparison/filter change),
+# and the large template-rendering mixin (template). The mixins/ tests directory
+# does not exist; there is no test sub-package to exclude.
+[[tool.mypy.overrides]]
+module = [
+    "djust.mixins.__init__",
+    "djust.mixins.activity",
+    "djust.mixins.async_work",
+    "djust.mixins.components",
+    "djust.mixins.context",
+    "djust.mixins.flash",
+    "djust.mixins.handlers",
+    "djust.mixins.jit",
+    "djust.mixins.layout",
+    "djust.mixins.model_binding",
+    "djust.mixins.navigation",
+    "djust.mixins.notifications",
+    "djust.mixins.page_metadata",
+    "djust.mixins.post_processing",
+    "djust.mixins.push_events",
+    "djust.mixins.request",
+    "djust.mixins.rust_bridge",
+    "djust.mixins.sticky",
+    "djust.mixins.streams",
+    "djust.mixins.template",
+    "djust.mixins.waiters",
+]
+ignore_errors = false
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+warn_return_any = true
+
+
+# theming/ subpackage (ADR-023 M4c, part 3) — every top-level module of the
+# theming system flipped from the lenient default to strict islands. Spans the
+# registry singleton + accessor + discovery wiring, the ThemeManager + state,
+# the CSS generators (theme / pack / component / design-system / color), the
+# palette/colors/accessibility/high-contrast color machinery, the
+# context-processor + template-resolver render paths, the ThemeMixin +
+# components + forms renderer, the build-time generator, the shadcn/tailwind
+# adapters, the inspector dev tool, the system checks, the AppConfig, the
+# Rust-engine tag-handler registry (rust_handlers — small + already typed,
+# unlike components/rust_handlers), and the leaf config/constants/types modules.
+# The theming/{management,templatetags,gallery} subpackages remain lenient for a
+# continuation batch. No theming/tests/ dir exists (nothing to exclude).
+[[tool.mypy.overrides]]
+module = [
+    "djust.theming.__init__",
+    "djust.theming._builtin_presets",
+    "djust.theming._config",
+    "djust.theming._constants",
+    "djust.theming._registry_accessor",
+    "djust.theming._types",
+    "djust.theming.accessibility",
+    "djust.theming.apps",
+    "djust.theming.build_themes",
+    "djust.theming.cache",
+    "djust.theming.checks",
+    "djust.theming.colors",
+    "djust.theming.compat",
+    "djust.theming.component_css_generator",
+    "djust.theming.components",
+    "djust.theming.context_processors",
+    "djust.theming.contracts",
+    "djust.theming.css_generator",
+    "djust.theming.design_system_css",
+    "djust.theming.design_tokens",
+    "djust.theming.forms",
+    "djust.theming.high_contrast",
+    "djust.theming.inspector",
+    "djust.theming.loaders",
+    "djust.theming.manager",
+    "djust.theming.manifest",
+    "djust.theming.mixins",
+    "djust.theming.pack_css_generator",
+    "djust.theming.palette",
+    "djust.theming.presets",
+    "djust.theming.registry",
+    "djust.theming.rust_handlers",
+    "djust.theming.shadcn",
+    "djust.theming.tailwind",
+    "djust.theming.template_resolver",
+    "djust.theming.theme_css_generator",
+    "djust.theming.theme_packs",
+    "djust.theming.urls",
+    "djust.theming.views",
+]
+ignore_errors = false
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+warn_return_any = true
+
+# pwa / optimization / tenants / observability subpackages (ADR-023 M4d, part 2)
+# — every non-test module of these four optional-extra subpackages flipped from
+# the lenient default to strict islands. Spans the PWA mixins / offline storage /
+# sync engine / manifest / service-worker / utils, the fingerprint + section-cache
+# + serializer-codegen + query-optimizer + serializer-cache optimization layer,
+# the multi-tenant resolvers / managers / backends / middleware / mixin / audit /
+# security (tenant-isolation-sensitive — annotations only, logic byte-identical),
+# and the observability endpoint views / middleware (localhost-gate preserved) /
+# SQL+timing+log+traceback capture / dry-run side-effect blocker / registry / urls.
+# Real bugs fixed to clean the islands: pwa.storage.OfflineAction.id widened to
+# Union[str, int] (callers forward an int obj_id) and pwa.mixins.delete_offline
+# now passes the required OfflineAction(data={}) (omission raised TypeError at
+# runtime). No */tests/ dirs exist in these subpackages (nothing to exclude).
+[[tool.mypy.overrides]]
+module = [
+    "djust.pwa.__init__",
+    "djust.pwa.manifest",
+    "djust.pwa.mixins",
+    "djust.pwa.service_worker",
+    "djust.pwa.storage",
+    "djust.pwa.sync",
+    "djust.pwa.utils",
+    "djust.optimization.__init__",
+    "djust.optimization.cache",
+    "djust.optimization.codegen",
+    "djust.optimization.fingerprint",
+    "djust.optimization.query_optimizer",
+    "djust.tenants.__init__",
+    "djust.tenants.audit",
+    "djust.tenants.backends",
+    "djust.tenants.managers",
+    "djust.tenants.middleware",
+    "djust.tenants.mixin",
+    "djust.tenants.models",
+    "djust.tenants.resolvers",
+    "djust.tenants.security",
+    "djust.observability.__init__",
+    "djust.observability.dry_run",
+    "djust.observability.log_handler",
+    "djust.observability.middleware",
+    "djust.observability.registry",
+    "djust.observability.sql",
+    "djust.observability.timings",
+    "djust.observability.tracebacks",
+    "djust.observability.urls",
+    "djust.observability.views",
+]
+ignore_errors = false
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+warn_return_any = true
+
+# tutorials / api / template / state_backends subpackages (ADR-023 M4d, part 3)
+# — four independent transport/render/persistence subpackages flipped from the
+# lenient default to strict islands. Spans the declarative guided-tour state
+# machine (tutorials: the TutorialStep dataclass + TutorialMixin), the opt-in
+# HTTP-API transport (api: the @event_handler(expose_api=True) / @server_function
+# dispatch views, pluggable auth, the registry, OpenAPI schema, and URL wiring),
+# the Rust template engine's Django backend (template: backend, the multi-line
+# {# #} loaders, the rendering pipeline, and the JSON-value serializer), and the
+# LiveView state-persistence backends (state_backends: the StateBackend ABC, the
+# in-memory + Redis backends, and the registry). api/ and state_backends/ are
+# security/correctness-relevant — annotations only, logic byte-identical. Three
+# PyO3 methods consumed by the state backends (RustLiveView.serialize_msgpack /
+# deserialize_msgpack / get_timestamp) were added to `_rust.pyi` (they existed at
+# runtime but were missing from the wire-boundary stub). None of the four
+# subpackages has a tests/ subdir, so there is no test sub-package to exclude.
+[[tool.mypy.overrides]]
+module = [
+    "djust.tutorials.__init__",
+    "djust.tutorials.mixin",
+    "djust.tutorials.step",
+    "djust.api.__init__",
+    "djust.api.auth",
+    "djust.api.dispatch",
+    "djust.api.errors",
+    "djust.api.openapi",
+    "djust.api.registry",
+    "djust.api.urls",
+    "djust.template.__init__",
+    "djust.template.backend",
+    "djust.template.loaders",
+    "djust.template.rendering",
+    "djust.template.serialization",
+    "djust.state_backends.__init__",
+    "djust.state_backends.base",
+    "djust.state_backends.memory",
+    "djust.state_backends.redis",
+    "djust.state_backends.registry",
+]
+ignore_errors = false
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+warn_return_any = true
+
+# mcp/ + contrib/uploads/ + uploads/ subpackages (ADR-023 M4d, group 4) —
+# flipped from the lenient default to strict islands. Spans: the MCP server
+# (the AI-assistant introspection/scaffolding tool — server/__init__/__main__),
+# the binary-WebSocket-frame upload system (uploads/ — the UploadWriter base +
+# BufferedUploadWriter + UploadConfig, the resumable chunk protocol, the
+# pluggable state stores (in-memory + Redis), and the upload-status view), and
+# the contrib upload-writer adapters (contrib/uploads/ — S3 presigned/event,
+# GCS resumable, Azure block-blob, shared errors). None of these subpackages has
+# a tests/ dir, so there is no test sub-package to exclude. Upload logic is
+# byte-identical — annotations only (security-relevant binary-frame handling).
+# Real type bugs / boundary narrows fixed to clean this island:
+#   - uploads/storage.py, contrib/uploads/s3_presigned.py, mcp/server.py: several
+#     [no-any-return] narrowed with cast() at the json.loads / boto3-presign /
+#     requests.Response.text untyped boundaries.
+#   - mcp/server.py: two observability-tool `params` dicts inferred as
+#     homogeneous str/int from their first key, then mutated with the other type
+#     ([assignment]); annotated `dict[str, object]` (mixed query-param values).
+#   - uploads/{__init__,contrib/uploads/gcs,contrib/uploads/azure}.py: the
+#     legacy `write_chunk(self, chunk)` overrides (no `chunk_index`) carry a
+#     coded `# type: ignore[override]` — the dropped trailing default is an
+#     intentional, runtime-dispatched part of the UploadWriter contract
+#     (`_writer_accepts_chunk_index`), documented on the base method.
+# Third-party `requests` (consumed by mcp/server + contrib/uploads/gcs, no stubs)
+# is marked untyped in the `["yaml", "requests"]` override above.
+[[tool.mypy.overrides]]
+module = [
+    "djust.mcp.__init__",
+    "djust.mcp.__main__",
+    "djust.mcp.server",
+    "djust.uploads.__init__",
+    "djust.uploads.resumable",
+    "djust.uploads.storage",
+    "djust.uploads.views",
+    "djust.contrib.__init__",
+    "djust.contrib.uploads.__init__",
+    "djust.contrib.uploads.azure",
+    "djust.contrib.uploads.errors",
+    "djust.contrib.uploads.gcs",
+    "djust.contrib.uploads.s3_events",
+    "djust.contrib.uploads.s3_presigned",
+]
+ignore_errors = false
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+warn_return_any = true
+
+# management/ + checks/ + auth/ + templatetags/ subpackages + loose top-level
+# modules (ADR-023 M4d, group 1) — flipped from the lenient default to strict
+# islands. Spans every management command (audit / check / doctor / setup_css /
+# typecheck / gen_live / new / schema / mcp / ai_context / generate_sw /
+# cleanup) + their shared introspection helper; the full Django system-check
+# family (configuration / security / templates / quality / components /
+# integrations / accessibility + the shared utils); the auth layer (view-auth
+# core, mixins, social context processor, signup/login views + forms, the admin
+# plugin + its LiveView pages); all five template-tag modules (live_tags / flash
+# / formsets / pwa / tutorials); and the independent loose modules (cli,
+# dev_server, deploy_cli, drafts, http_streaming, session_utils, push,
+# middleware). `_root.*` system-check re-exports + a few optional-dependency
+# fallback imports carry narrow coded `# type: ignore`s for the genuinely
+# dynamic edges (setattr re-export, djust-admin fallback class, _rust optional
+# `version`). The */tests/ dirs stay lenient. Third-party `requests` (consumed
+# by deploy_cli) is marked untyped in the override above alongside `yaml`.
+[[tool.mypy.overrides]]
+module = [
+    "djust.management.__init__",
+    "djust.management._introspect",
+    "djust.management.commands.__init__",
+    "djust.management.commands.cleanup_liveview_sessions",
+    "djust.management.commands.djust_ai_context",
+    "djust.management.commands.djust_audit",
+    "djust.management.commands.djust_check",
+    "djust.management.commands.djust_doctor",
+    "djust.management.commands.djust_gen_live",
+    "djust.management.commands.djust_mcp",
+    "djust.management.commands.djust_new",
+    "djust.management.commands.djust_schema",
+    "djust.management.commands.djust_setup_css",
+    "djust.management.commands.djust_typecheck",
+    "djust.management.commands.generate_sw",
+    "djust.checks.__init__",
+    "djust.checks.accessibility",
+    "djust.checks.components",
+    "djust.checks.configuration",
+    "djust.checks.integrations",
+    "djust.checks.quality",
+    "djust.checks.security",
+    "djust.checks.templates",
+    "djust.checks.utils",
+    "djust.auth.__init__",
+    "djust.auth.admin_views",
+    "djust.auth.apps",
+    "djust.auth.core",
+    "djust.auth.djust_admin",
+    "djust.auth.forms",
+    "djust.auth.mixins",
+    "djust.auth.social",
+    "djust.auth.urls",
+    "djust.auth.views",
+    "djust.templatetags.__init__",
+    "djust.templatetags.djust_flash",
+    "djust.templatetags.djust_formsets",
+    "djust.templatetags.djust_pwa",
+    "djust.templatetags.djust_tutorials",
+    "djust.templatetags.live_tags",
+    "djust.cli",
+    "djust.dev_server",
+    "djust.deploy_cli",
+    "djust.drafts",
+    "djust.http_streaming",
+    "djust.session_utils",
+    "djust.push",
+    "djust.middleware",
+]
+ignore_errors = false
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+warn_return_any = true
+
+# scaffolding/ + template_tags/ + theming/gallery/ subpackages (ADR-023 M4e,
+# group 2) — flipped from the lenient default to strict islands. Spans: the
+# CRUD scaffolding generator (scaffolding/ — the JSON/interactive schema-to-
+# LiveView+admin code generator, its template strings, and the gen_live wiring);
+# the Rust-engine custom template-tag handlers (template_tags/ — the {% url %},
+# {% static %}, {% djust_pwa %}, {% templatetag %}, {% dj_flash %},
+# {% djust_markdown %}, {% djust_client_config %}, and {% live_render %} handlers
+# registered with the Rust renderer, distinct from the Django-engine
+# templatetags/ package already flipped in M4d); and the theme-gallery /
+# component-storybook surface (theming/gallery/ — the gallery/editor/diff +
+# storybook DEBUG/staff-gated views, the example-context + serialization
+# builders, the component registry, and the URL wiring). No */tests/ dirs exist
+# in these subpackages (nothing to exclude). Annotations only — render output is
+# byte-identical. The SafeString/HTML boundaries (format_html / escape /
+# Template.render / reverse / static / _client_config_html / component .render())
+# return ``Any`` under the lenient global config (Django untyped); each is
+# coerced with ``str(...)`` at the boundary to satisfy warn_return_any without
+# changing the returned (already-safe) HTML. Real type fix: scaffolding/
+# generator.py list_display_fields annotated ``list[str]`` (var-annotated).
+[[tool.mypy.overrides]]
+module = [
+    "djust.scaffolding.__init__",
+    "djust.scaffolding.gen_live",
+    "djust.scaffolding.gen_live_templates",
+    "djust.scaffolding.generator",
+    "djust.scaffolding.templates",
+    "djust.template_tags.__init__",
+    "djust.template_tags.client_config",
+    "djust.template_tags.flash",
+    "djust.template_tags.live_render",
+    "djust.template_tags.markdown",
+    "djust.template_tags.pwa",
+    "djust.template_tags.static",
+    "djust.template_tags.templatetag",
+    "djust.template_tags.url",
+    "djust.theming.gallery.__init__",
+    "djust.theming.gallery.component_registry",
+    "djust.theming.gallery.context",
+    "djust.theming.gallery.storybook",
+    "djust.theming.gallery.urls",
+    "djust.theming.gallery.views",
+]
+ignore_errors = false
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+warn_return_any = true
+
+# theming/themes/ theme-definition subpackage (ADR-023 M4f) — flipped from the
+# lenient default to a strict island via a single glob (`djust.theming.themes.*`,
+# mirroring the `djust.security.*` pattern), so a new built-in theme file added
+# to this directory is strict-by-default with no pyproject edit. The subpackage
+# is ~63 per-theme data modules (default / nord / dracula / catppuccin / ... —
+# each a flat set of module-level ColorScale/ThemeTokens/ThemePreset/
+# DesignSystem/ThemePack literals, no functions), the dependency-free re-export
+# hub `_base`, the package `__init__` (pure re-exports), and the deprecated
+# `_legacy` module (the Theme/THEMES dataclass API kept for backward compat).
+# The theme-data modules and `_base`/`__init__` were already strict-clean (data
+# + re-exports); the only annotation work was on `_legacy._DeprecatedThemesDict`
+# — its nine `dict` overrides (`__getitem__`/`__contains__`/`get`/`items`/
+# `keys`/`values`/`__iter__`/`__len__`) were untyped, annotated to match the
+# `dict` superclass signatures (logic byte-identical; deprecation-warning
+# behavior unchanged). No theming/themes/tests/ dir exists (nothing to exclude).
+# (The top-level theming/ modules are already a strict island — M4c part 3 —
+# but mypy's `djust.theming.*` glob matches only direct children, not the deeper
+# `djust.theming.themes.X` submodules, so this subpackage needs its own entry.)
+[[tool.mypy.overrides]]
+module = ["djust.theming.themes.*"]
+ignore_errors = false
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+warn_return_any = true
+
+# Loose top-level modules + backends/ + db/ (ADR-023 M4e, group 1) — flipped
+# from the lenient default to strict islands. Spans the independent loose
+# top-level modules (the AppConfig, the AST security-audit walker, the live
+# runtime auditor, the bug-capture harness, the proposed CSS system-checks, the
+# lifecycle hooks registry, the hot-view-replacement engine, the
+# state/template backend back-compat shims, the template-filter helpers, the
+# time-travel recorder, the shared utils + BackendRegistry, and the package
+# __main__ entry point) plus the two leaf subpackages: the presence backends
+# (base / memory / redis / registry) and the PostgreSQL LISTEN/NOTIFY bridge
+# (decorators / exceptions / notifications). `db/decorators` carries narrow
+# coded `# type: ignore[attr-defined]`s for the dynamic `_djust_notify_*`
+# introspection attributes stashed on / deleted from the decorated model class.
+# The */tests/ dirs stay lenient.
+[[tool.mypy.overrides]]
+module = [
+    "djust.apps",
+    "djust.audit_ast",
+    "djust.audit_live",
+    "djust.bug_capture",
+    "djust.checks_css_proposal",
+    "djust.hooks",
+    "djust.hot_view_replacement",
+    "djust.state_backend",
+    "djust.template_backend",
+    "djust.template_filters",
+    "djust.time_travel",
+    "djust.utils",
+    "djust.__main__",
+    "djust.backends.__init__",
+    "djust.backends.base",
+    "djust.backends.memory",
+    "djust.backends.redis",
+    "djust.backends.registry",
+    "djust.db.__init__",
+    "djust.db.decorators",
+    "djust.db.exceptions",
+    "djust.db.notifications",
+]
+ignore_errors = false
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+warn_return_any = true
+
+# theming/templatetags/ + theming/management/ subpackages (ADR-023 M4e, group 3)
+# — the deferred theming leaf template tags + the theming management command,
+# flipped from the lenient default to strict islands. The theming MACHINERY was
+# made strict in M4c (part 3); this group finishes theming by flipping its
+# user-facing render surface: the four template-tag modules (theme_components —
+# the ~26 themed component tags; theme_pages — the auth/error/utility page-fragment
+# tags; theme_tags — theme_head/css/switcher/mode/preset accessors; theme_form_tags
+# — the form-render tags) and the djust_theme management command (tailwind-config /
+# export-colors / list-presets / shadcn-import-export / init / create-theme /
+# validate-theme / create-package / check-compat / marketplace-info subcommands).
+# These tags RENDER theme components into pages: their mark_safe / format_html
+# return values are typed SafeString (the HTML-safe boundary), output byte-identical.
+# Real type fixes to clean the islands:
+#   - theme_components.theme_progress: `percentage` annotated `float` (the
+#     `min(100, (int(value)/int(max))*100)` reassignment is a float; the `= 0`
+#     seed inferred int).
+#   - theme_tags.theme_framework_overrides: format_html result narrowed via a
+#     `str` local at the unstubbed-django boundary ([no-any-return]).
+#   - theme_pages/theme_components/theme_form_tags `_css_prefix()`: `str(...)`
+#     narrow over the untyped `get_theme_config().get(...)` boundary.
+#   - theme_pages._csrf_token_value: `str(get_token(request))` narrow.
+#   - djust_theme.handle_marketplace_info: required-positional `mp_theme_name`
+#     read via subscript (not `.get()`) so it stays non-Optional for the Path
+#     division + `get_component_coverage(str, ...)` call ([operator]/[arg-type]).
+# No theming/{templatetags,management}/tests/ dirs exist (nothing to exclude).
+[[tool.mypy.overrides]]
+module = [
+    "djust.theming.templatetags.__init__",
+    "djust.theming.templatetags.theme_components",
+    "djust.theming.templatetags.theme_form_tags",
+    "djust.theming.templatetags.theme_pages",
+    "djust.theming.templatetags.theme_tags",
+    "djust.theming.management.__init__",
+    "djust.theming.management.commands.__init__",
+    "djust.theming.management.commands.djust_theme",
+]
+ignore_errors = false
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+warn_return_any = true
 
 [tool.bandit]
 # Skip mark_safe warnings in components - this is a templating framework

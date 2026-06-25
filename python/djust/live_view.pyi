@@ -18,6 +18,11 @@ from .mixins.streams import StreamsMixin
 from .streaming import StreamingMixin
 from .session_utils import Stream
 
+# Module-level framework-internal attribute denylist used by change-detection
+# (consumed by djust.websocket._snapshot_assigns). Declared here so strict
+# islands importing it resolve against this stub.
+_FRAMEWORK_INTERNAL_ATTRS: frozenset[str]
+
 class LiveView(
     StreamsMixin,
     StreamingMixin,
@@ -71,9 +76,14 @@ class LiveView(
         dom_id: Optional[Callable[[Any], str]] = None,
         at: int = -1,
         reset: bool = False,
+        limit: Optional[int] = None,
     ) -> Stream: ...
-    def stream_insert(self, name: str, item: Any, at: int = -1) -> None: ...
-    def stream_delete(self, name: str, item_or_id: Any) -> None: ...
+    def stream_insert(  # type: ignore[misc, override]  # sync StreamsMixin form; async StreamingMixin form below
+        self, name: str, item: Any, at: int = -1
+    ) -> None: ...
+    def stream_delete(  # type: ignore[misc, override]  # sync StreamsMixin form; async StreamingMixin form below
+        self, name: str, item_or_id: Any
+    ) -> None: ...
     def stream_reset(self, name: str, items: Any = None) -> None: ...
 
     # StreamingMixin async methods
@@ -83,7 +93,7 @@ class LiveView(
         target: Optional[str] = None,
         html: Optional[str] = None,
     ) -> None: ...
-    async def stream_insert(  # type: ignore[misc]  # noqa: F811  # Overload with StreamsMixin
+    async def stream_insert(  # type: ignore[misc, override, no-redef]  # noqa: F811  # async StreamingMixin form; co-defined with sync StreamsMixin form above
         self,
         stream_name: str,
         html: str,
@@ -113,7 +123,7 @@ class LiveView(
         stream_name: str,
         target: Optional[str] = None,
     ) -> None: ...
-    async def stream_delete(  # type: ignore[misc]  # noqa: F811  # Overload with StreamsMixin
+    async def stream_delete(  # type: ignore[misc, override, no-redef]  # noqa: F811  # async StreamingMixin form; co-defined with sync StreamsMixin form above
         self,
         stream_name: str,
         selector: str,
