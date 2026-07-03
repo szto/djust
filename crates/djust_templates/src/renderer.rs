@@ -159,12 +159,13 @@ pub fn render_nodes_with_loader<L: TemplateLoader>(
         match node {
             Node::AssignTag { name, args } => {
                 // Resolve variable references in args using the same
-                // semantics as `Node::CustomTag`.
+                // JSON-aware semantics as `Node::CustomTag`, so
+                // structured (list/object) values survive as JSON for
+                // the handler instead of collapsing to "[List]".
                 let resolved_args: Vec<String> = args
                     .iter()
                     .map(|arg| resolve_tag_arg(arg, active_ctx))
                     .collect();
-
                 let context_map = active_ctx.to_hashmap();
                 // Forward the raw-Python sidecar so assign handlers
                 // can reach Python-only context (request, view) the
@@ -201,14 +202,28 @@ pub fn render_nodes_with_loader<L: TemplateLoader>(
     Ok(output)
 }
 
-/// Resolve a tag argument the same way `Node::CustomTag` does.
+/// Resolve an assign-tag argument against the render context.
 ///
 /// - Quoted string literals are returned unchanged.
 /// - `key=value` pairs resolve `value` against the context.
-/// - Bare names are looked up in the context.
-///
-/// Used by both `CustomTag` (via its inline logic) and `AssignTag`.
+/// - Bare names present in the context inline their value; **lists and
+///   objects are JSON-encoded** so the Python handler can recover the
+///   structured data — a plain `to_string()` would emit the opaque
+///   `"[List]"` / `"[Object]"` placeholder and lose the payload. This is
+///   what lets built-in handlers like `regroup` receive the source list.
+/// - Names **not** in the context are returned unchanged (kept literal),
+///   so keyword operands such as regroup's `by` / `as` tokens and bare
+///   attribute names survive rather than collapsing to an empty string.
 fn resolve_tag_arg(arg: &str, context: &Context) -> String {
+    fn value_to_arg_string(v: &Value) -> String {
+        match v {
+            Value::List(_) | Value::Object(_) => {
+                serde_json::to_string(v).unwrap_or_else(|_| v.to_string())
+            }
+            _ => v.to_string(),
+        }
+    }
+
     let arg_trimmed = arg.trim();
     if (arg_trimmed.starts_with('"') && arg_trimmed.ends_with('"'))
         || (arg_trimmed.starts_with('\'') && arg_trimmed.ends_with('\''))
@@ -224,12 +239,12 @@ fn resolve_tag_arg(arg: &str, context: &Context) -> String {
             return arg.to_string();
         }
         return match context.get(value) {
-            Some(resolved) => format!("{}={}", key, resolved),
+            Some(resolved) => format!("{}={}", key, value_to_arg_string(resolved)),
             None => arg.to_string(),
         };
     }
     match context.get(arg_trimmed) {
-        Some(resolved) => resolved.to_string(),
+        Some(resolved) => value_to_arg_string(resolved),
         None => arg.to_string(),
     }
 }
@@ -256,6 +271,7 @@ pub fn render_nodes_collecting<L: TemplateLoader>(
 
         let frag = match node {
             Node::AssignTag { name, args } => {
+                // Resolve args (JSON-aware) as in render_nodes_with_loader.
                 let resolved_args: Vec<String> = args
                     .iter()
                     .map(|arg| resolve_tag_arg(arg, active_ctx))
@@ -327,6 +343,7 @@ pub fn render_nodes_partial<L: TemplateLoader>(
         if needs_render {
             let html = match node {
                 Node::AssignTag { name, args } => {
+                    // Resolve args (JSON-aware) as in render_nodes_with_loader.
                     let resolved_args: Vec<String> = args
                         .iter()
                         .map(|arg| resolve_tag_arg(arg, active_ctx))
@@ -1196,6 +1213,8 @@ pub fn render_node_with_loader<L: TemplateLoader>(
             // invoke the handler for its side-effects but discard the
             // result — there's no way to propagate context mutations
             // without a sibling to pass them to. Emits empty string.
+            //
+            // Resolve args (JSON-aware) as in render_nodes_with_loader.
             let resolved_args: Vec<String> = args
                 .iter()
                 .map(|arg| resolve_tag_arg(arg, context))
