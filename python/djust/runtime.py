@@ -1784,6 +1784,7 @@ class ViewRuntime:
         *,
         scope: Optional[Dict[str, Any]] = None,
         rate_limiter: Optional[ConnectionRateLimiter] = None,
+        renderer_factory: Optional[Any] = None,
     ) -> None:
         self.transport = transport
         self.view_instance: Optional[Any] = None
@@ -1798,6 +1799,13 @@ class ViewRuntime:
         # runtime-local lock would be a different object and could not serialize
         # against those (#560). The transport borrows the consumer's existing lock
         # via ``transport.event_context(view)`` (ADR-022 Iter 2 Phase 2.3a, #1899).
+        # ADR-019 LVN-I PR-2: Renderer factory plumbed through. Stored
+        # for PR-3 (handshake) to set based on ``?platform=`` selection;
+        # ``None`` means "use the default ``HtmlRenderer``" which the
+        # dispatch site (``TemplateMixin.render_with_diff``) already
+        # constructs inline. Type kept ``Any`` to avoid circular import
+        # with ``djust.renderers``; runtime use-site will cast.
+        self.renderer_factory = renderer_factory
 
     # ------------------------------------------------------------------ #
     # Public properties
@@ -1949,6 +1957,13 @@ class ViewRuntime:
                 return
 
         self.view_instance = view_instance
+
+        # ADR-019 LVN-I: if the handshake selected a renderer (factory
+        # passed in via __init__), bind it to the view so
+        # TemplateMixin.render_with_diff can dispatch through it
+        # instead of always constructing HtmlRenderer inline.
+        if self.renderer_factory is not None:
+            view_instance._djust_renderer = self.renderer_factory(view_instance)
 
         # Stash the client-supplied dotted view path from the mount frame so the
         # transport hook (WS ``on_view_mounted``) can derive the server-push channel
@@ -2353,7 +2368,13 @@ class ViewRuntime:
                     await sync_to_async(view_instance._initialize_rust_view)(request)
                 if hasattr(view_instance, "_sync_state_to_rust"):
                     await sync_to_async(view_instance._sync_state_to_rust)()
-                html, _patches, rust_version = await sync_to_async(view_instance.render_with_diff)()
+                # ADR-019 LVN: capture patches (was discarded as ``_patches``) — for
+                # native renderers (NativeRenderer) ``html`` is empty and the wire
+                # payload is the patch list, shipped on the mount frame below so the
+                # native client can bootstrap its widget tree on connect.
+                html, render_patches, rust_version = await sync_to_async(
+                    view_instance.render_with_diff
+                )()
                 if hasattr(view_instance, "_strip_comments_and_whitespace"):
                     html = await sync_to_async(view_instance._strip_comments_and_whitespace)(html)
                 if hasattr(view_instance, "_extract_liveview_content"):
@@ -2424,6 +2445,18 @@ class ViewRuntime:
                 "Runtime: skipping mount HTML for resume of %s — client already has DOM",
                 sanitize_for_log(view_path),
             )
+
+        # ADR-019 LVN: for native renderers (NativeRenderer), ``html`` is empty and
+        # the wire payload is patches. Ship them in the mount frame so the native
+        # client can bootstrap its widget tree on connect (the browser/HTML path
+        # needs ``html`` only — patches arrive on subsequent updates). ``render_patches``
+        # was captured at the render call above; the actor branch does not set it, so
+        # read it via ``locals()`` and only attach when a non-HTML renderer is bound
+        # and patches are present + non-empty.
+        if getattr(view_instance, "_djust_renderer", None) is not None and locals().get(
+            "render_patches"
+        ):
+            mount_msg["patches"] = locals()["render_patches"]
 
         # state_snapshot_signed EMIT (ADR-022 Iter 3 Phase 3.1, WS
         # websocket.py:2754-2792). When the view opts in (``enable_state_snapshot``)

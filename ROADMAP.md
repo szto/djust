@@ -634,14 +634,19 @@ v1.1.x headline direction.
 
 **#1551 — Multi-line `{# ... #}` comment handling disagrees between Rust + Django classical.** Follow-up to #1423 (which fixed the Rust side but didn't normalize behavior with classical Django). A template containing a multi-line `{# ... #}` comment whose body includes template-tag-like syntax (e.g., `{% if foo %}` as prose) renders cleanly through the Rust engine (`djust._rust.render_template_with_dirs` — LiveView WS responses, prod page renders) but crashes through Django's classical renderer (`client.get()` in pytest, Django's debug error page renderer, any view using `render()` directly) with `TemplateSyntaxError: Unexpected end of expression in if tag`. Silent footgun — projects ship templates that work on the dev server (Rust path) and break in CI or on error paths (classical path). Same reporter, same project, hit this trap TWICE in 90 minutes after explicitly documenting the gotcha. **Suggested fix** (per issue body): (1) normalize comment handling at template-load time in djust's Django integration — preprocess `{# ... #}` blocks before classical parsing; (2) OR reject multi-line `{# ... #}` containing `{% ... %}` in the Rust engine so the failure mode is identical between paths; (3) OR document the asymmetry loudly. Independent subsystem from #1550/#1552; process as a separate PR.
 
-**Parallel work track — LiveView Native (ADR-019, 2026-05-23):**
+**Parallel work track — LiveView Native (ADR-019, 2026-05-23):** ALL TRACKING ISSUES CLOSED.
 
-| Priority | Issue | Summary |
-|---|---|---|
-| **P1** | (new) | **LVN-I** — Renderer abstraction in djust core (`python/djust/renderers/`); `HtmlRenderer` extracted from existing pipeline; `ViewRuntime` plumbing. HTML stays default. No external behavior change. See [ADR-019 Iter I](docs/adr/019-liveview-native.md#iter-i--renderer-abstraction-in-djust-core). |
-| **P2** | (new) | **LVN-II** — Baseline 12-widget vocabulary + `NativeRenderer` emitting widget-shaped VNodes from `.swiftui.html` / `.compose.html` template variants. See [ADR-019 Iter II](docs/adr/019-liveview-native.md#iter-ii--widget-vocabulary--nativerenderer). |
-| **P2** | (new) | **LVN-III/IV** — `djust-native-ios` Swift Package v0.1 + `djust-native-android` Kotlin library v0.1 in separate repos. MAX Companion `HomeView` as the pilot. |
-| **P3** | (new) | **LVN-V** — Author guide + migration guide + v1.0 widget-vocabulary lock. |
+Filter: [`liveview-native` label](https://github.com/djust-org/djust/issues?q=is%3Aissue+label%3Aliveview-native).
+
+| Priority | Issue | Summary | Status |
+|---|---|---|---|
+| **P1** | ~~#1577~~ | ~~**LVN-I** — Renderer abstraction in djust core.~~ | ✅ 3/3 PRs shipped (#1583 protocol, #1584 runtime, #1585 handshake) |
+| **P2** | ~~#1578~~ | ~~**LVN-II** — Widget vocabulary + `NativeRenderer` + resolver.~~ | ✅ 4/4 structural PRs (#1586 vocab, #1587 scaffold, #1588 resolver, #1589 wiring). Pending: Rust widget VDOM walker. |
+| **P2** | ~~#1579~~ | ~~**LVN-III** — `djust-native-ios` Swift Package.~~ | ✅ 7/7 PRs in [`djust-native-ios`](https://github.com/djust-org/djust-native-ios) (scaffold + Patch types + applicator + renderers + events + wiring + PILOT.md). Pending: msgpack decoder body + per-op SwiftUI binding extensions. |
+| **P2** | ~~#1580~~ | ~~**LVN-IV** — `djust-native-android` Kotlin library.~~ | ✅ 7/7 PRs in [`djust-native-android`](https://github.com/djust-org/djust-native-android) (mirror of iOS). Pending: msgpack decoder body + per-op Compose binding extensions. |
+| **P3** | ~~#1581~~ | ~~**LVN-V** — Author guide + migration guide + v1.0 lock.~~ | ✅ Initial author guide shipped (#1590); full migration guide + v1.0 SemVer lock as follow-up when native client msgpack decoders + applicator bindings ship. |
+
+**Structurally complete across djust + 2 native repos** (24 PRs landed in one `/pipeline-run` session: 10 in djust, 7 each in djust-native-ios and djust-native-android). The remaining engineering — msgpack decoder bodies in both native clients, per-op view-tree binding extensions, the Rust widget VDOM walker — is documented in each closed issue's final comment and in the respective repos' `PILOT.md` files. Each gap is a focused follow-up that benefits from a dedicated session with the right platform tooling.
 
 > Sub-milestone, not the v1.1 headline. Path E (defer to launch soak) stays
 > the chosen headline direction per the 2026-05-19 strategy session; LiveView
