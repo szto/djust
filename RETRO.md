@@ -362,7 +362,7 @@ issue or be explicitly closed with a reason.
 | 320 | `djust-release` SKILL.md needs a "which branch is the release-of-record" pre-flight when multiple long-lived release branches exist | v1.1.0rc5 retro | #2027 | OUT-OF-REPO | In-repo half DONE + GitHub #2027 CLOSED v1.1.0-6: `make release`/`make release-dry-run` hard-fail if the target tag already exists locally or on origin (Makefile). Remaining skill-prompt half is out-of-repo (gitignored `.claude/skills/djust-release/SKILL.md`). Trigger: `/djust-release 1.1.0rc4` ran against `main`, which had been reverted to 1.0.8 post-#1974/#1975 while the real v1.1 line + the already-tagged/PyPI-live rc4 lived on a separate `1.1` branch. |
 | 321 | Automated pre-commit/CI check pinning already-tagged CHANGELOG.md sections against their tagged content | v1.1.0rc5 retro | #2028 | Closed | Resolved v1.1.0-6 (PR #2029): `scripts/check-changelog-tagged-sections.py` pins every shipped section against the *newest* release tag's snapshot (dogfood #1060 showed pinning against each section's OWN tag floods false positives — rolling-rc sections keep accumulating post-tag; a section is frozen once *superseded*). Wired as a pre-commit hook; empirical canary (#1459) is a permanent test. 119 sections pin clean against v1.1.0rc5. |
 | 322 | CI Python job omits `python/djust/tests/` — a large suite (incl. the RED `TestSetattrChokepoint` CWE-915 guard, and this-repo's #2020/#1977 tests) is un-gated | PR #2031 / v1.1.0-6 retro | #2032 | Closed | Resolved v1.1.0-7 (PR #2035): deliberately re-verified + fixed the stale `_SETATTR_WHITELIST` pins (1213/1215 → 1225/1227, confirmed still the sanctioned DynamicLiveView developer-dict application, not a new client-controlled setattr), and added `python/djust/tests/` to CI as a `continue-on-error` soak step (green on first runner run). Blocking-gate promotion split to #323 (#2034). |
-| 323 | Promote the `python/djust/tests/` CI soak step to a blocking gate + add the dir to the pre-push hook | PR #2035 / v1.1.0-7 retro | #2034 | Open | #2032 added the dir to CI as `continue-on-error` per #1534 (a CI surface the dev machine can't fully mirror — `-n auto` xdist over ~4000 newly-covered tests). It ran GREEN on its first runner run (evidence noted on #2034), so removing `continue-on-error` (or folding into the gating `pytest tests/ python/tests/` command) + adding `python/djust/tests/` to the pre-push `pytest` hook is now low-risk. Do it once the soak has also shown green on a `main` push-CI run. |
+| 323 | Promote the `python/djust/tests/` CI soak step to a blocking gate + add the dir to the pre-push hook | PR #2035 / v1.1.0-7 retro | #2034 | Closed | Resolved v1.1.0-8 (PR #2039): the soak ran green on the `main` push-CI run at `72d78601` (the awaited precondition), so `continue-on-error` was removed — the step now runs inside `python-tests`, which is in the `test-summary` AND-condition (#1713), so a failure gates the merge; `python/djust/tests/` added to the pre-push `pytest` hook too. Self-validated: PR #2039's own `python-tests (py3.12)` was the first run with the gate live and passed (empirical canary #1459). |
 
 ## v1.1.0rc5 — main/1.1 branch consolidation + release cut (PR #2026)
 
@@ -408,6 +408,59 @@ The `1.1` branch had renamed `## [Unreleased]` → `## [1.1.0rc4]` when it cut r
 
 - [x] `djust-release` SKILL.md branch-of-record pre-flight — tracked in Action Tracker #320 (GitHub #2027) — in-repo half + GitHub #2027 resolved in v1.1.0-6; skill-prompt half now OUT-OF-REPO
 - [x] Automated CHANGELOG already-tagged-section pinning check — tracked in Action Tracker #321 (GitHub #2028) — resolved in v1.1.0-6 (PR #2029)
+
+## v1.1.0-8 — custom-tag arg double-resolution + CI-gate promotion drain (PRs #2038/#2039)
+
+**Date**: 2026-07-04
+**Scope**: Drained a production-found correctness bug in the Rust↔Python custom-tag argument bridge (#2037 — `{% djust_markdown %}` corrupting a per-`{% for %}`/`{% include ... with %}`-scoped dict-field value into a Python-tuple-repr, found live in a downstream chat app on 1.1.0rc6), and the CI-gate promotion the v1.1.0-7 retro deferred (#2034 — the `python/djust/tests/` soak → blocking gate, now that its precondition was met). 2 PRs, 2 issues closed; #2037 (framework correctness, security-adjacent shared helper) done inline with an independent worktree-less adversarial review, #2034 (CI config) done inline. 0 follow-ups. Deferred and untouched: #2017 (large dj-virtual server-side-reconcile enhancement), #1561/#1562 (`priority:low` feature tracks).
+**Tests at close**: 1 new suite — `python/djust/tests/test_markdown_arg_double_resolve_2037.py` (11: unit + handler + real-Rust-render levels).
+
+### What We Learned
+
+**1. Distrust the reporter's cited *cause*, not just the cited *path* — symptom-up triage collapsed a "streaming/loop-cache" theory to a synchronous one-render bug.** #2037's (thorough, grep-verified) report hypothesized the trigger was djust's per-loop HTML render cache accumulating state across a real `is_streaming: True→False` WebSocket transition — its own `LiveViewTestClient.render(engine="rust")` test did *not* reproduce it, which pushed the theory toward streaming. Tracing the tuple-repr (`('...', '...')`) backwards through the bridge found the real cause: the Rust `Node::CustomTag` dispatch *pre-resolves* a bare-name arg (`block.text`) to its **value** string, and `TagHandler._resolve_arg` then re-interpreted that already-resolved value as a template token — any value containing `=` was tuple-split. It reproduced with a single synchronous render (no streaming, no loop cache, no WebSocket). The report's own test missed it only because it used a top-level model object (which Rust can't resolve → passes the literal token → Python resolves correctly), not a loop-scoped plain dict (which Rust resolves → passes the value → Python double-resolves). Extends the Bug-report triage canon along the mechanism axis: the cited *environment cause* is as untrustworthy as the cited *code path*.
+
+**Action taken**: Closed — #2037 fixed in PR #2038.
+
+**2. The #1646 cure landed at the shared chokepoint — one guard, six custom tags, no latent twin.** `_resolve_arg` is the single Rust→Python argument re-resolver behind `url`/`static`/`live_render`/`flash`/`pwa`/`djust_markdown`. The fix token-guards it (kwarg-split fires only for `^[A-Za-z_]\w*=`; dotted-lookup only for a bare dotted-identifier path; anything else — a Rust-resolved value with whitespace/markup — is returned verbatim). The adversarial review confirmed there's no parallel Django-templatetag markdown twin and no other value re-resolution site, so the single-chokepoint fix is genuinely complete. The one residual (a resolved value shaped `ident=value` with no whitespace) is closed for the reported sink by a defence-in-depth tuple-fallback in `markdown.py` — the reviewer caught that this branch had zero coverage and a gate-off-verified test was added.
+
+**Action taken**: Closed — shipped the `_resolve_arg` token-guard + markdown fallback in PR #2038.
+
+**3. The #1534 soak→promote lifecycle closed cleanly and the promotion self-validated.** #2034 removed `continue-on-error` from the `python/djust/tests/` step (promoting it into the `python-tests` job, which is in the `test-summary` AND-condition per #1713) and added the dir to the pre-push hook. The precondition was real, not assumed: the soak ran green on the `main` push-CI run at `72d78601`. And the promotion validated itself — PR #2039's own `python-tests (py3.12)` was the first run with the gate *live*, and it passed; so did #2038's, which added a new file to the now-gated dir. A gate that passes its own first gated run is the cleanest possible empirical canary (#1459).
+
+**Action taken**: Closed — #2034 shipped in PR #2039; Action Tracker #323 closed.
+
+**4. Gate off a *committed* change with a direct edit + `git checkout HEAD`, never `git stash push -- <path>`.** While gate-off-verifying the review-nit test, `git stash push -- markdown.py` was used to "remove the fix" — but the fix was already *committed*, so the stash saved nothing, and the follow-up `git stash pop` silently popped an ancient unrelated deep-list `stash@{0}` (a months-old WIP), polluting 4 files with a ROADMAP.md conflict. Recovery was clean (only the test file was legitimately dirty; the old stash was *kept*, not lost, because the conflicting pop aborted). The correct way to gate off a committed change is a direct edit (`if False and …`) + `git checkout HEAD -- <path>` to restore. Reinforces the draft-preservation git-hazard note (bare `git stash pop` grabs the deep-list top) and the #292 unstaged-work discipline.
+
+**Action taken**: `note` — captured in the draft-preservation memory + this retro; no code deliverable (workflow discipline).
+
+### Insights
+
+- **The drain is still self-feeding, but the source shifted from framework to downstream.** v1.1.0-7's issues came from the previous *drain*; v1.1.0-8's #2037 came from a downstream **production** app running the release the pipeline cut. The dogfood loop now reaches past the framework's own suite into real consumer traffic — which is exactly where a common Django idiom (`{% for %}` + `{% include with %}` + a custom tag) surfaced a corruption no in-repo test exercised.
+- **Right-sized review depth over right-sized delegation.** Both issues were done inline (neither warranted a worktree implementer), but the security-adjacent shared-helper change (#2037, feeds an unescaped-HTML markdown sink) got an independent adversarial review that earned its keep — it found the untested fallback branch. The CI-config change (#2034) got inline review only. Match review depth to blast radius, not to who typed the code.
+- **A green pre-push/CI is not a green *dev* environment, and vice versa** — but here the layered gates aligned: local `-n auto` (4066 passed), the branch's own pre-push, and CI's newly-blocking gate all agreed. The soak-first caution (#1534) again cost nothing.
+
+### Review Stats
+
+| Metric | PR #2038 | PR #2039 | Total |
+|--------|----------|----------|-------|
+| Issues closed | 1 (#2037) | 1 (#2034) | 2 |
+| Tests added | 11 | 0 (CI config) | 11 |
+| Gate-off sentinel (#1468) | ✓ (4 RED) | n/a (config) | ✓ |
+| Adversarial review | ✓ (found 1 nit, fixed) | inline | 1 |
+| CI failures | 0 | 0 | 0 |
+| Follow-ups filed | — | — | 0 |
+
+### Process Improvements Applied
+
+**CLAUDE.md**: no new canon — finding 1 extends the existing Bug-report triage canon (mechanism axis, already noted in the v1.1.0-4 / production-incident rules); finding 2 reinforces #1646; finding 3 reinforces #1534/#1713/#1459. Finding 4 is a workflow-tooling note (memory), not framework canon.
+**CI**: `.github/workflows/test.yml` `python/djust/tests/` step promoted to blocking; `.pre-commit-config.yaml` pre-push `pytest` hook gained the dir (#2034).
+**Memory**: `feedback_draft_preservation_git_hazards` updated with the gate-off-a-committed-change rule (finding 4).
+**Checklist / Pipeline template / Skills**: none.
+
+### Open Items
+
+- [ ] dj-virtual deeper server-side reconcile — tracked in Action Tracker #318 (GitHub #2017), carried forward
+- [ ] bug-capture iter B/C (`priority:low`) — GitHub #1562/#1561, carried forward
 
 ## v1.1.0-7 — post-rc6 live-verify drain (PRs #2035/#2036)
 
@@ -458,7 +511,7 @@ The `1.1` branch had renamed `## [Unreleased]` → `## [1.1.0rc4]` when it cut r
 
 ### Open Items
 
-- [ ] Promote the `python/djust/tests/` CI soak step to a blocking gate + add to the pre-push hook — tracked in Action Tracker #323 (GitHub #2034)
+- [x] Promote the `python/djust/tests/` CI soak step to a blocking gate + add to the pre-push hook — tracked in Action Tracker #323 (GitHub #2034) — resolved in v1.1.0-8 (PR #2039)
 - [ ] dj-virtual deeper server-side reconcile — tracked in Action Tracker #318 (GitHub #2017), carried forward
 
 ## v1.1.0-6 — retro-tail + carryover drain (PRs #2029/#2030/#2031)

@@ -19,7 +19,9 @@ Two name shapes appear in this roadmap, with distinct meanings:
 
 **Released**: `v0.9.1` cut 2026-04-30 (tag `v0.9.1`, GitHub Release published, PyPI live). Bundles 8 drain buckets + post-cleanup. Retro: RETRO.md §v0.9.1. Tracker carryovers (#1234, #1235, #1236) and the post-release SSE bug bundle (#1237) move into `v0.9.2-1` below.
 
-## v1.1.0-8 — custom-tag arg double-resolution + CI-gate promotion drain (drain bucket → ships in 1.1.0)
+## v1.1.0-8 — custom-tag arg double-resolution + CI-gate promotion drain (drain bucket → ships in 1.1.0) ✅
+
+**Complete (2026-07-04)** — both issues closed: #2037 (PR #2038), #2034 (PR #2039). 0 follow-ups. Retro: RETRO.md §v1.1.0-8.
 
 Open-issue drain (2026-07-04) of what surfaced after the v1.1.0-7 drain: a
 production-found **correctness bug** in the Rust↔Python custom-tag argument
