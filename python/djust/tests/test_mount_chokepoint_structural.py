@@ -217,9 +217,15 @@ _SETATTR_WHITELIST = {
     # state-snapshot section — re-derived against the rebased live_view.py and
     # re-verified sanctioned: still the DynamicLiveView developer-dict
     # application (class at line 1277, ``result = func(request, ...)`` at 1288),
-    # not a new client-controlled setattr.
-    ("live_view.py", 1292),
-    ("live_view.py", 1294),
+    # not a new client-controlled setattr;
+    # shifted +24 (1292/1294 → 1316/1318) by the PR #2022 review fix: the
+    # ``NonPersistableStateError`` class (+ guard/docstring growth) was added
+    # to live_view.py ahead of the LiveView class so the runtime's #1788
+    # fail-soft wrapper can re-raise the deliberate DEBUG rejection —
+    # re-verified sanctioned: still the same two DynamicLiveView
+    # developer-dict setattr lines, not a new client-controlled setattr.
+    ("live_view.py", 1316),
+    ("live_view.py", 1318),
 }
 
 

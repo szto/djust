@@ -31,9 +31,16 @@ HMAC signing was built to guard against) — so the fix here is instead to
 FAIL LOUD, EARLY, in the persistence path only:
 
 * In ``DEBUG`` (dev), ``_capture_snapshot_state(strict=True)`` raises
-  ``TypeError`` with an actionable message (store the pk, refetch in the
-  handler) — matching the existing ``get_state()`` DEBUG-friendly-error
-  convention (``live_view.py`` ~1019-1028).
+  ``NonPersistableStateError`` (a ``TypeError`` subclass) with an actionable
+  message (store the pk, refetch in the handler) — matching the existing
+  ``get_state()`` DEBUG-friendly-error convention (``live_view.py``
+  ~1019-1028). The dedicated class exists so the REAL mount-path caller
+  (``runtime.py``'s snapshot emission, wrapped in a broad
+  ``except Exception`` per the #1788 "snapshot emission must never break
+  mount" posture) can re-raise the deliberate rejection instead of
+  swallowing it — without the re-raise, DEBUG silently degraded to
+  log-and-continue on the real path and the "raises in DEBUG" claim was
+  only true for direct method calls (review finding on PR #2022).
 * In production, it logs a warning and skips the attribute (never crashes
   a mount/reconnect over this).
 
@@ -61,6 +68,7 @@ import pytest
 from django.test import override_settings
 
 from djust import LiveView
+from djust.live_view import NonPersistableStateError
 
 
 def _make_user(*, username="alice", pk=7):
@@ -101,6 +109,10 @@ class TestCaptureSnapshotStateRejectsOrmObjectsInDebug:
         assert "User" in msg
         # Actionable guidance: store the pk, refetch in the handler.
         assert "pk" in msg
+        # The dedicated subclass is what lets the runtime's #1788 fail-soft
+        # wrapper re-raise this deliberate rejection (see
+        # TestRealMountPathDebugFailsLoud below).
+        assert isinstance(exc_info.value, NonPersistableStateError)
 
     @override_settings(DEBUG=True)
     def test_queryset_raises_actionable_type_error(self):
@@ -184,3 +196,109 @@ class TestRenderingJitPipelineUnaffected:
 
         state = view.get_state()
         assert state["user"] is view.user
+
+
+# --------------------------------------------------------------------------- #
+# REAL mount path (review finding on PR #2022): the only strict=True caller
+# (``runtime.py`` snapshot emission) wraps the capture in a broad
+# ``except Exception`` (#1788 "snapshot emission must never break mount").
+# Before the ``NonPersistableStateError`` re-raise, that wrapper swallowed the
+# DEBUG rejection, so the real mount path logged-and-continued and the
+# "raises in DEBUG" claim held only for DIRECT ``_capture_snapshot_state``
+# calls (the classes above). These tests drive ``ViewRuntime.dispatch_mount``
+# end-to-end — reproduction fidelity per the CLAUDE.md triage canon: the
+# harness must exercise the real path, not a convenient proxy.
+# --------------------------------------------------------------------------- #
+
+
+class _RealPathOrmView(LiveView):
+    """Opt-in snapshot view with an ORM object on public state, renderable
+    end-to-end (the JIT rendering path handles the Model fine — the bug lives
+    exclusively in the persistence capture that follows the render)."""
+
+    enable_state_snapshot = True
+    template = '<div dj-root dj-id="0">{{ label }}</div>'
+
+    def mount(self, request, **kwargs):
+        self.user = _make_user()
+        self.label = "safe-scalar"
+
+    def get_context_data(self, **kwargs):
+        return {"label": self.label}
+
+
+_REAL_PATH_VIEW = f"{__name__}._RealPathOrmView"
+_REAL_PATH_URL = "/orm-snap/"
+
+
+@pytest.mark.django_db
+class TestRealMountPathDebugFailsLoud:
+    """DEBUG + the REAL runtime mount path: the rejection must propagate out
+    of ``dispatch_mount`` (fail loud), not be swallowed into a log line by
+    the #1788 fail-soft wrapper."""
+
+    @pytest.mark.asyncio
+    async def test_debug_rejection_propagates_out_of_dispatch_mount(self):
+        from asgiref.sync import sync_to_async
+
+        from djust.tests.test_runtime_mount_state_restore_1913 import (
+            _make_db_session,
+            _make_request,
+            _make_runtime,
+        )
+
+        session = await sync_to_async(_make_db_session)()
+        request = _make_request(session)
+        runtime, transport = _make_runtime(request)
+
+        with override_settings(DEBUG=True, LIVEVIEW_ALLOWED_MODULES=["djust"]):
+            with pytest.raises(NonPersistableStateError) as exc_info:
+                await runtime.dispatch_mount(
+                    {"type": "mount", "view": _REAL_PATH_VIEW, "url": _REAL_PATH_URL}
+                )
+
+        # The actionable guidance survives the real path end-to-end.
+        assert "pk" in str(exc_info.value)
+        # Fail LOUD means the mount frame was never shipped — the developer
+        # sees the error instead of a half-mounted view missing state.
+        assert transport.mount_frame is None
+
+    @pytest.mark.asyncio
+    async def test_production_mount_survives_and_skips_orm_key(self, caplog):
+        """Production on the SAME real path: mount succeeds (#1788 posture
+        intact), the ORM key is skipped from the signed blob, the sibling
+        scalar persists, and the skip is warned. Doubles as the gate-off
+        sibling proving the re-raise is scoped to DEBUG — if the re-raise
+        ever fired in production, this mount would crash."""
+        import json as _json
+
+        from asgiref.sync import sync_to_async
+
+        from djust.security import unsign_snapshot
+        from djust.tests.test_runtime_mount_state_restore_1913 import (
+            _make_db_session,
+            _make_request,
+            _make_runtime,
+        )
+
+        session = await sync_to_async(_make_db_session)()
+        request = _make_request(session)
+        runtime, transport = _make_runtime(request)
+
+        with override_settings(DEBUG=False, LIVEVIEW_ALLOWED_MODULES=["djust"]):
+            with caplog.at_level(logging.WARNING, logger="djust.live_view"):
+                await runtime.dispatch_mount(
+                    {"type": "mount", "view": _REAL_PATH_VIEW, "url": _REAL_PATH_URL}
+                )
+
+        frame = transport.mount_frame
+        assert frame is not None, "production mount must never break over this (#1788)"
+
+        signed = frame.get("state_snapshot_signed")
+        assert isinstance(signed, str) and signed
+        inner = unsign_snapshot(signed, _REAL_PATH_VIEW, session.session_key)
+        assert inner is not None
+        persisted = _json.loads(inner)
+        assert "user" not in persisted, "ORM object must be skipped from the signed blob"
+        assert persisted.get("label") == "safe-scalar"
+        assert any("user" in rec.message for rec in caplog.records)

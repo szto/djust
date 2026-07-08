@@ -2527,7 +2527,18 @@ class ViewRuntime:
                         mount_msg["state_snapshot_signed"] = sign_snapshot(
                             state_json, view_path, session_key
                         )
-        except Exception:  # noqa: BLE001 — snapshot emission must never break mount
+        except Exception as snapshot_exc:  # noqa: BLE001 — snapshot emission must never break mount
+            from .live_view import NonPersistableStateError
+
+            if isinstance(snapshot_exc, NonPersistableStateError):
+                # DELIBERATE DEBUG-only rejection from
+                # LiveView._reject_orm_value_in_state_persistence — the guard
+                # exists to fail the mount loudly in development, so it must
+                # NOT be downgraded to a log line by the fail-soft posture
+                # below (which remains for UNEXPECTED emission errors).
+                # Production never raises this (the guard warns + skips
+                # there), so this re-raise is DEBUG-only by construction.
+                raise
             logger.exception(
                 "Failed to emit state_snapshot_signed for %s; proceeding without snapshot",
                 sanitize_for_log(view_path),

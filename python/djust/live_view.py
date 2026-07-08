@@ -165,6 +165,24 @@ _COMPONENT_INTERNAL_ATTRS: frozenset = frozenset(
 )
 
 
+class NonPersistableStateError(TypeError):
+    """A Django ``Model``/``QuerySet`` was found on PUBLIC LiveView state
+    during the client-signed persistence capture (``enable_state_snapshot``).
+
+    Raised (DEBUG only) by
+    :meth:`LiveView._reject_orm_value_in_state_persistence` instead of a
+    bare ``TypeError`` so the runtime's snapshot-emission fail-soft wrapper
+    (``runtime.py``, the #1788 "snapshot emission must never break mount"
+    posture) can distinguish this DELIBERATE developer-error report from an
+    unexpected emission failure and re-raise it: the whole point of the
+    guard is to fail the mount loudly in development, which a broad
+    ``except Exception`` would otherwise silently downgrade to a log line.
+
+    Production never sees this exception — the guard logs a warning and
+    skips the attribute instead.
+    """
+
+
 class LiveView(  # type: ignore[misc]  # StreamsMixin(sync) + StreamingMixin(async) intentionally co-define stream_insert/stream_delete; see live_view.pyi overloads
     ContextProviderMixin,
     StreamsMixin,
@@ -822,6 +840,12 @@ class LiveView(  # type: ignore[misc]  # StreamsMixin(sync) + StreamingMixin(asy
         ``Model``/``QuerySet`` — the caller should skip persisting ``key``.
         Returns False for everything else, including when Django's ORM isn't
         importable.
+
+        In DEBUG the raise is a :class:`NonPersistableStateError` (a
+        ``TypeError`` subclass) so the real mount-path caller's #1788
+        fail-soft wrapper (``runtime.py`` snapshot emission) re-raises it
+        instead of swallowing it — the DEBUG failure is loud end-to-end,
+        not just when this method is called directly.
         """
         try:
             from django.db import models
@@ -844,7 +868,7 @@ class LiveView(  # type: ignore[misc]  # StreamsMixin(sync) + StreamingMixin(asy
             f"`self.{key}_id = {key}.pk` rather than `self.{key} = {key}`."
         )
         if getattr(settings, "DEBUG", False):
-            raise TypeError(msg)
+            raise NonPersistableStateError(msg)
         logger.warning(msg)
         return True
 
